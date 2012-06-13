@@ -14,6 +14,7 @@ createClient
 
 Client makes a connection to random node ("scout"). if fails, tries another one after timeout.
 
+```
 checks `server_info.role`
   if 'master'
     use scout connection as master
@@ -31,6 +32,7 @@ checks `server_info.role`
 
 if slave's `server_info.role` is 'master' (2 masters), do `SLAVEOF host port` on slave.
   query master while slave syncs
+```
 
 open separate connection to slave, and do `SUBSCRIBE haredis:master`
 
@@ -41,6 +43,7 @@ Attempt to "lock" all the slaves
 
 generate random id
 
+```
 iterate slaves and:
   (MULTI)
     `SETNX haredis:failover (id)`
@@ -59,6 +62,7 @@ once all are iterated,
 event on `haredis:master` channel cancels failover process
   connect to that node as master
   use existing slave
+```
 
 Failover (slave down)
 =====================
