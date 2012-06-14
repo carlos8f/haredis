@@ -5,6 +5,7 @@ var redis = require('redis')
   , default_port = 6379
   , default_host = '127.0.0.1'
   , default_retry_timeout = 1000
+  , commands = require('./node_modules/redis/lib/commands')
   ;
 
 function createClient(nodes, options) {
@@ -14,6 +15,7 @@ exports.createClient = createClient;
 
 function RedisHAClient(nodeList, options) {
   EventEmitter.call(this);
+  options = options || {};
   this.retryTimeout = options.retryTimeout || default_retry_timeout;
   this.nodes = [];
   this.queue = [];
@@ -26,7 +28,7 @@ function RedisHAClient(nodeList, options) {
 }
 util.inherits(RedisHAClient, EventEmitter);
 
-Object.keys(redis.prototype).forEach(function(k) {
+commands.forEach(function(k) {
   RedisHAClient.prototype[k] = function() {
     var args = Array.prototype.slice.call(arguments);
     if (!this.ready) {
@@ -86,7 +88,7 @@ Object.keys(redis.prototype).forEach(function(k) {
     if (!node) {
       node = this.master;
     }
-    return node.client[k].apply(node, args);
+    return node.client[k].apply(node.client, args);
   };
 });
 
@@ -116,7 +118,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, clientOptions) {
       }
       var parts = n.split(':');
       var options = {};
-      if (/^\d+$/.match(parts[0])) {
+      if (/^\d+$/.test(parts[0])) {
         options.port = parseInt(parts[0]);
         options.host = default_host;
       }
