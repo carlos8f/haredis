@@ -5,6 +5,7 @@ Node app uses
 
 ```javascript
 var client = require('haredis').createClient(['localhost:6379', 'localhost:6380', 'localhost:6381'], options);
+// Functions same way as standard redis client
 ```
 
 Writes go to master, reads go to random slave (if `client.slaveOk()` is done before the command).
@@ -41,9 +42,8 @@ Failover (master down)
 
 Attempt to "lock" all the slaves
 
-generate random id
-
 ```
+generate random id
 iterate slaves and:
   (MULTI)
     `SETNX haredis:failover (id)`
@@ -67,4 +67,8 @@ event on `haredis:master` channel cancels failover process
 Failover (slave down)
 =====================
 
+```
 Pick another random slave
+`SADD haredis:failing host:port`
+(use a ttl?)
+```
