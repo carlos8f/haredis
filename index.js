@@ -137,16 +137,27 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, clientOptions) {
     var node = new Node(options, clientOptions);
     node.on('error', function(err) {
       console.warn(err, 'error on ' + this.host + ':' + this.port);
+      this.setStatus('down');
       if (this.role == 'master') {
         self.failover();
       }
     });
     node.on('role', function() {
       if (this.role == 'master') {
-        console.log(this.toString() + ' is master');
-        self.master = this;
-        self.emit('ready');
+        if (self.master && self.master.status != 'down') {
+          // Already have a good master, so there is a duplicate. Make it a slave
+          // of our master.
+          self.makeSlave(this);
+        }
+        else {
+          console.log(this.toString() + ' is master');
+          self.master = this;
+          self.emit('ready');
+        }
       }
+    });
+    node.on('status', function() {
+      console.log(this.toString() + ' is ' + this.status);
     });
     node.on('ping', function(latency) {
       console.log(this.toString() + ' pong with ' + latency + 'ms latency');
@@ -155,13 +166,23 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, clientOptions) {
   });
 };
 
+RedisHAClient.prototype.makeSlave = function(node) {
+  console.log('making ' + node.toString() + ' into a slave...');
+  node.client.SLAVEOF(this.master.host, this.master.port, function(err, reply) {
+    if (err) {
+      return console.error(err, 'error setting slaveof');
+    }
+  });
+};
+
 RedisHAClient.prototype.failover = function() {
+  console.log('failing over!');
   this.ready = false;
 };
 
 RedisHAClient.prototype.__defineGetter__('slaves', function() {
   return this.nodes.every(function(node) {
-    return node.role == 'slave' && !node.failing;
+    return node.role == 'slave' && node.status == 'up';
   });
 });
 
