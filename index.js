@@ -114,7 +114,7 @@ RedisHAClient.prototype.drainQueue = function() {
   }
 };
 
-RedisHAClient.prototype.parseNodeList = function(nodeList, clientOptions) {
+RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
   var self = this;
   nodeList.forEach(function(n) {
     if (typeof n == 'object') {
@@ -125,24 +125,21 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, clientOptions) {
         n = n + "";
       }
       var parts = n.split(':');
-      var options = {};
+      var spec = {};
       if (/^\d+$/.test(parts[0])) {
-        options.port = parseInt(parts[0]);
-        options.host = default_host;
+        spec.port = parseInt(parts[0]);
+        spec.host = default_host;
       }
       else if (parts.length == 2) {
-        options.host = parts[0];
-        options.port = parseInt(parts[1]);
+        spec.host = parts[0];
+        spec.port = parseInt(parts[1]);
       }
       else {
-        options.host = parts[0];
-        options.port = default_port;
-      }
-      if (options.host == 'localhost') {
-        options.host = '127.0.0.1';
+        spec.host = parts[0];
+        spec.port = default_port;
       }
     }
-    var node = new Node(options, clientOptions);
+    var node = new Node(spec, options);
     node.on('error', function(err) {
       console.warn(err);
       // Label node as down, possibly failover
@@ -165,6 +162,21 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, clientOptions) {
       }
       console.log(this.toString() + ' is ' + this.role);
     });
+    node.on('gossip', function(info) {
+      if (!self.master) {
+        // Get the master from slave gossip
+        self.nodes.forEach(function(n) {
+          if (info.master_host == n.host && info.master_port == n.port) {
+            console.log('got master (' + n.toString() + ') from ' + node.toString() + "'s gossip. thanks!");
+            n.role = 'master';
+            self.master = n;
+          }
+        });
+        if (!self.master) {
+          console.warn(this.toString() + ' has ' + info.master_host + ':' + info.master_port + ' as master, but not found in nodes!');
+        }
+      }
+    });
     node.on('status', function() {
       console.log(this.toString() + ' is ' + this.status);
     });
@@ -173,6 +185,12 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, clientOptions) {
 };
 
 RedisHAClient.prototype.makeSlave = function(node) {
+  if (!this.master) {
+    return console.error("can't make " + node.toString() + " a slave of unknown master!");
+  }
+  if (node.host == this.master.host && node.port == this.master.port) {
+    return console.warn('refusing to make ' + node.toString() + ' a slave of itself!');
+  }
   console.log('making ' + node.toString() + ' into a slave...');
   node.client.SLAVEOF(this.master.host, this.master.port, function(err, reply) {
     if (err) {
@@ -194,18 +212,21 @@ RedisHAClient.prototype.failover = function() {
   this.ready = false;
   var tasks = [];
   var id = uuid();
+  console.log('my failover id: ' + id);
   var self = this;
   this.slaves.forEach(function(node) {
     tasks.push(function(cb) {
-      node.client.MULTI
+      node.client.MULTI()
         .SETNX('haredis:failover', id)
         .GET('haredis:failover', function(err, reply) {
           if (reply != id) {
-            return cb(new Error('failover already in progress'));
+            return cb(new Error('failover already in progress: ' + reply));
           }
           // set a shortish ttl on the lock
-          node.client.EXPIRE('haredis:failover', 5000, function(err) {
-            // Ignore errors
+          node.client.EXPIRE('haredis:failover', 5, function(err) {
+            if (err) {
+              console.error(err);
+            }
           });
         })
         .EXEC(function(err, replies) {
@@ -230,7 +251,9 @@ RedisHAClient.prototype.failover = function() {
         results.forEach(function(node) {
           if (node) {
             node.client.DEL('haredis:failover', function(err) {
-              // Ignore errors
+              if (err) {
+                console.error(err);
+              }
             });
           }
         });
@@ -245,12 +268,14 @@ RedisHAClient.prototype.failover = function() {
           freshest = node;
         }
       });
+      console.log(freshest.toString() + ' seems freshest.');
       freshest.client.SLAVEOF('NO', 'ONE', function(err) {
         if (err) {
           console.error(err, 'error electing master');
           return self.retryFailover();
         }
         self.master = freshest;
+        self.master.role = 'master';
         self.master.setStatus('up');
         self.slaves.forEach(function(node) {
           self.makeSlave(node);
