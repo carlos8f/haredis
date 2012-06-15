@@ -25,7 +25,7 @@ once all nodes come back with responses (or errors),
     count of master != 1
     master host/port on a slave doesn't point to central master
   use slaves in command rotation once ready
-  subscribe to `haredis:gossip` channel on all nodes  
+  subscribe to `haredis:gossip` channel on all nodes
 ```
 
 Failover
@@ -34,7 +34,7 @@ Failover
 ```
 (queue commands while failing over)
 generate random id
-iterate slaves and:
+iterate online nodes and:
   (MULTI)
     `SETNX haredis:failover (id)`
     `GET haredis:failover`
@@ -44,7 +44,11 @@ iterate slaves and:
   else, roll back other nodes (`DEL` keys) and wait (randomized timeout)
 
 once all are iterated,
-  elect slave with lowest master_last_io_seconds_ago as master
+  if no master
+    elect node with lowest master_last_io_seconds_ago as master
+  if multiple masters
+    elect node with most `connected_slaves` or `uptime_in_seconds`
+  then
     `SLAVEOF NO ONE` on that node
     `SLAVEOF host port` on other nodes
     `PUBLISH haredis:gossip master:host:port` on master
