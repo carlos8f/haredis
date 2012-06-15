@@ -14,6 +14,7 @@ orientate()
 ===========
 
 Called:
+- with `createClient()`
 - when a node comes online
 - when a node throws an error (goes offline)
 
