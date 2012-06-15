@@ -5,7 +5,7 @@ var redis = require('redis')
   , default_port = 6379
   , default_host = '127.0.0.1'
   , default_retry_timeout = 1000
-  , default_failover_wait = 10000
+  , default_reorientate_wait = 10000
   , commands = require('./node_modules/redis/lib/commands')
   , async = require('async')
   , uuid = require('./lib/uuid')
@@ -20,12 +20,14 @@ function RedisHAClient(nodeList, options) {
   EventEmitter.call(this);
   options = options || {};
   this.retryTimeout = options.retryTimeout || default_retry_timeout;
+  this.orientating = false;
   this.nodes = [];
   this.queue = [];
   this.ready = false;
   this.on('ready', function() {
     this.ready = true;
-    this.failoverInProgress = false;
+    this.orientating = false;
+    console.log('ready, using ' + this.master + ' as master');
     this.drainQueue();
   });
   this.parseNodeList(nodeList, options);
@@ -91,7 +93,17 @@ commands.forEach(function(k) {
         break;
     }
     if (preferSlave) {
-      //node = this.randomSlave();
+      node = this.randomSlave();
+    }
+    else {
+      // For write operations, increment an op counter, to judge freshness of slaves.
+      var self = this;
+      this.master.client.INCR('haredis:opcounter', function(err, reply) {
+        if (err) {
+          // Emitting an error on master will cause failover!
+          self.master.emit('error', err);
+        }
+      });
     }
     if (!node) {
       node = this.master;
@@ -151,6 +163,9 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
       if (self.responded.length == nodeList.length) {
         self.orientate();
       }
+      else {
+        console.log('only ' + self.responded.length + ' responded with ' + nodeList.length + ' in nodeList');
+      }
     });
     node.on('error', function(err) {
       console.warn(err);
@@ -160,32 +175,39 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
 };
 
 RedisHAClient.prototype.orientate = function() {
+  if (this.orientating) {
+    return;
+  }
+  console.log('orientating...');
+  this.orientating = true;
+  if (this.retryInterval) {
+    clearInterval(this.retryInterval);
+  }
   var tasks = [], self = this;
   this.ready = false;
-  this.nodes.forEach(function(node) {
+  if ((this.up.length / this.down.length) <= 0.5) {
+    console.log("refusing to orientate without a majority up! (" + this.up.length + '/' + this.nodes.length + ')');
+    return this.reorientate();
+  }
+  this.up.forEach(function(node) {
     tasks.push(function(cb) {
       node.client.INFO(function(err, reply) {
-        var info = node.info = Node.parseInfo(reply);
-        node.role = info.role;
         if (err) {
-          node.emit('error', err);
+          node.client.emit('error', err);
           // Purposely don't pass err to cb so parallel() can continue
           return cb(null, node);
         }
-        else if (info.loading && info.loading !== '0') {
-          // Node is still loading. Try again later...
-          var retry_time = info.loading_eta_seconds * 1000;
-          err = new Error(node + ' still loading, trying again in ' + retry_time + 'ms');
-          setTimeout(function () {
-            self.orientate();
-          }, retry_time);
+        var info = node.info = Node.parseInfo(reply);
+        node.role = info.role;
+        if (info.loading && info.loading !== '0') {
+          err = new Error(node + ' still loading');
           return cb(err);
         }
         else if (info.master_host) {
           // Resolve the host to prevent false duplication
           Node.resolveHost(info.master_host, function(err, host) {
             if (err) {
-              node.emit('error', err);
+              node.client.emit('error', err);
               // Purposely don't pass err so parallel() can continue
               return cb(null, node);
             }
@@ -201,6 +223,10 @@ RedisHAClient.prototype.orientate = function() {
     });
   });
   async.parallel(tasks, function(err, nodes) {
+    if (err) {
+      console.warn(err);
+      return self.reorientate();
+    }
     var masters = []
       , slaves = []
       , master_host
@@ -208,10 +234,6 @@ RedisHAClient.prototype.orientate = function() {
       , master_conflict = false
       ;
     nodes.forEach(function(node) {
-      if (!node.info) {
-        // Node is down
-        return;
-      }
       if (node.info.role == 'master') {
         masters.push(node);
       }
@@ -229,7 +251,7 @@ RedisHAClient.prototype.orientate = function() {
       console.warn('invalid master count: ' + masters.length);
       self.failover();
     }
-    else if (master_conflict || master_host != masters[0].host || master_port != masters[0].port) {
+    else if (slaves.length && (master_conflict || master_host != masters[0].host || master_port != masters[0].port)) {
       console.warn('master conflict detected');
       self.failover();
     }
@@ -252,6 +274,7 @@ RedisHAClient.prototype.makeSlave = function(node) {
     if (err) {
       return console.error(err, 'error setting slaveof');
     }
+    node.role = 'slave';
     console.log(node + ' is slave');
   });
 };
@@ -260,14 +283,6 @@ RedisHAClient.prototype.failover = function() {
   if (this.ready) {
     return console.log('ignoring failover while ready');
   }
-  if (this.failoverInProgress) {
-    return console.warn('failover already in progress');
-  }
-  if (this.up / this.down <= 0.5) {
-    return console.log("refusing to failover without a majority up");
-    return self.retryFailover();
-  }
-  this.failoverInProgress = true;
   console.log('attempting failover!');
   var tasks = [];
   var id = uuid();
@@ -289,7 +304,24 @@ RedisHAClient.prototype.failover = function() {
           });
         })
         .EXEC(function(err, replies) {
-          cb(err, node);
+          if (err) {
+            console.error(err, 'error locking node');
+            // Don't pass the error, so parallel() can continue.
+            cb(null, node);
+          }
+          else {
+            node.client.GET('haredis:opcounter', function(err, opcounter) {
+              if (err) {
+                console.error(err, 'error getting opcounter');
+                // Don't pass the error, so parallel() can continue.
+                cb(null, node);
+              }
+              else {
+                node.opcounter = opcounter;
+                cb(null, node);
+              }
+            });
+          }
         });
     });
   });
@@ -308,85 +340,32 @@ RedisHAClient.prototype.failover = function() {
           }
         });
       }
-      return self.retryFailover();
+      return self.reorientate();
     }
     else {
       // We've succeeded in locking all the nodes. Now elect our new master...
-      var votes = {}, last_io_slave;
+      var winner;
       results.forEach(function(node) {
-        if (!node.info) {
-          console.log('no info for ' + node + '?');
-          return;
-        }
-        switch (node.info.role) {
-          case 'slave':
-            var key = node.info.master_host + ':' + node.info.master_port;
-            if (node.info.master_link_status == 'up' && self.isUp(key)) {
-              // Slave points to a healthy master.
-              votes[key] = typeof votes[key] == 'undefined' ? 1 : votes[key] + 1;
-            }
-            else {
-              // Slave points to a downed master. A backup plan will be using
-              // the slave with freshest data.
-              if (!last_io_slave || node.info.master_last_io_seconds_ago < last_io_slave.info.master_last_io_seconds_ago) {
-                last_io_slave = node;
-              }
-            }
-            break;
-          case 'master':
-            // Node claims to be master. They need at least one connected slave
-            // (2 votes) to be honored.
-            var key = node.toString();
-            votes[key] = typeof votes[key] == 'undefined' ? 1 : votes[key] + 1;
-            break;
-        }
-      });
-      var winner, high, tie = [];
-      Object.keys(votes).forEach(function(key) {
-        var num = votes[key];
-        if (num < 2) {
-          return;
-        }
-        if (!high || num > high) {
-          high = num;
-          winner = key;
-        }
-        else if (num == high) {
-          tie.push(key);
-          delete winner;
+        if (!winner || node.opcounter > winner.opcounter) {
+          winner = node;
         }
       });
       if (winner) {
-        console.log(winner + ' received ' + high + ' votes, congrats!');
-        winner = self.nodeFromKey(winner);
+        console.log(winner + ' had highest opcounter (' + winner.opcounter + ') of ' + self.up.length + ' nodes. congrats!');
       }
-      else if (tie.length) {
-        console.log('election was a tie: ' + tie + ' using tiebraker: uptime');
-        tie.forEach(function(key) {
-          var node = self.nodeFromKey(key);
-          if (!winner || node.info.uptime_in_seconds > winner.info.uptime_in_seconds) {
-            winner = node;
-          }
-        });
-        console.log(winner + ' elected from highest uptime_in_seconds');
-      }
-      else if (last_io_slave) {
-        console.log(last_io_slave + ' elected from lowest master_last_io');
-        winner = last_io_slave;
-      }
-
-      if (!winner) {
+      else {
         console.error('election had no winner!?');
-        return self.retryFailover();
+        return self.reorientate();
       }
 
       winner.client.SLAVEOF('NO', 'ONE', function(err) {
         if (err) {
           console.error(err, 'error electing master');
-          return self.retryFailover();
+          return self.reorientate();
         }
         self.master = winner;
         self.master.role = 'master';
+        self.orientating = false;
         self.emit('ready');
 
         self.up.forEach(function(node) {
@@ -403,13 +382,13 @@ RedisHAClient.prototype.isMaster = function(node) {
   return this.master && this.master.toString() == node.toString();
 };
 
-RedisHAClient.prototype.retryFailover = function() {
+RedisHAClient.prototype.reorientate = function() {
   var self = this;
-  console.log('retrying failover in ' + default_failover_wait + 'ms');
-  setTimeout(function() {
-    self.failoverInProgress = false;
+  this.orientating = false;
+  console.log('reorientating in ' + default_reorientate_wait + 'ms');
+  this.retryInterval = setTimeout(function() {
     self.orientate();
-  }, default_failover_wait);
+  }, default_reorientate_wait);
 };
 
 RedisHAClient.prototype.__defineGetter__('slaves', function() {
