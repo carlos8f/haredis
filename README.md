@@ -8,41 +8,31 @@ var client = require('haredis').createClient(['localhost:6379', 'localhost:6380'
 // Functions same way as standard redis client
 ```
 
-Writes go to master, reads go to random slave (if `client.slaveOk()` is done before the command).
+Writes go to master, reads can be load-balanced to slaves.
 
-createClient
-============
+orientate
+=========
 
-Client makes a connection to random node ("scout"). if fails, tries another one after timeout.
-
-```
-checks `server_info.role`
-  if 'master'
-    use scout connection as master
-    pick random node to connect to as slave
-      if fails, repeat after timeout.
-      if all fails, use master only
-  if 'slave'
-    if master_link_status:down
-      if master_sync_in_progress
-        retry from new scout
-      else, initiate failover (link down and no sync)
-    connect to `server_info.master_host` and `server_info.master_port` as master
-      if fails, master apprears down. initiate failover
-    use scout as slave
-
-if slave's `server_info.role` is 'master' (2 masters), do `SLAVEOF host port` on slave.
-  query master while slave syncs
-```
-
-open separate connection to slave, and do `SUBSCRIBE haredis:master`
-
-Failover (master down)
-======================
-
-Attempt to "lock" all the slaves
+Called with `createClient`, and again when a node comes online.
 
 ```
+call INFO on all nodes in `nodeList`.
+  validate `server_info.role`
+    if 'slave', take note of its master_host/master_port
+
+once all nodes come back with responses (or errors),
+  failover if
+    count of master != 1
+    master host/port on a slave doesn't point to central master
+  use slaves in command rotation once ready
+  subscribe to `haredis:gossip` channel on all nodes  
+```
+
+Failover
+========
+
+```
+(queue commands while failing over)
 generate random id
 iterate slaves and:
   (MULTI)
@@ -54,21 +44,10 @@ iterate slaves and:
   else, roll back other nodes (`DEL` keys) and wait (randomized timeout)
 
 once all are iterated,
-  pick slave with lowest master_last_io_seconds_ago as master
-  `SLAVEOF NO ONE` on that node
-  `SLAVEOF host port` on other nodes
-  `PUBLISH haredis:master host:port` on master
+  elect slave with lowest master_last_io_seconds_ago as master
+    `SLAVEOF NO ONE` on that node
+    `SLAVEOF host port` on other nodes
+    `PUBLISH haredis:gossip master:host:port` on master
+    apps switch to that master
 
-event on `haredis:master` channel cancels failover process
-  connect to that node as master
-  use existing slave
-```
-
-Failover (slave down)
-=====================
-
-```
-Pick another random slave
-`SADD haredis:failing host:port`
-(use a ttl?)
 ```
