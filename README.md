@@ -10,10 +10,14 @@ var client = require('haredis').createClient(['localhost:6379', 'localhost:6380'
 
 Writes go to master, reads can be load-balanced to slaves.
 
-orientate
-=========
+orientate()
+===========
 
-Called with `createClient`, and again when a node comes online.
+Called:
+- when a node comes online
+- when a node throws an error (goes offline)
+
+Can't be called while in progress. Pauses commands (use queue).
 
 ```
 call INFO on all nodes in `nodeList`.
@@ -24,6 +28,8 @@ once all nodes come back with responses (or errors),
   failover if
     count of master != 1
     master host/port on a slave doesn't point to central master
+  set master and trigger ready
+    drain queue
   use slaves in command rotation once ready
   subscribe to `haredis:gossip` channel on all nodes
 ```
@@ -53,5 +59,4 @@ once all are iterated,
     `SLAVEOF host port` on other nodes
     `PUBLISH haredis:gossip master:host:port` on master
     apps switch to that master
-
 ```
