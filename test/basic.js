@@ -1,7 +1,10 @@
-var redis = require('../');
+var redis = require('../')
+  , uuid = require('../lib/uuid')
+  ;
 
 var client = redis.createClient([6379, 6380, 6381]);
 
-client.get('carlos', function(err, reply) {
-  console.log(reply);
-});
+setInterval(function() {
+  var id = uuid();
+  client.SET('test', id);
+ }, 20);
