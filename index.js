@@ -212,7 +212,6 @@ RedisHAClient.prototype.orientate = function() {
         // Node is down
         return;
       }
-      console.log(node.info);
       if (node.info.role == 'master') {
         masters.push(node);
       }
