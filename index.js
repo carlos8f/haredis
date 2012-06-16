@@ -264,7 +264,7 @@ RedisHAClient.prototype.orientate = function() {
         masters.push(node);
       }
       else if (node.info.role == 'slave') {
-        if (master_host && master_host != node.info.master_host) {
+        if (master_host && (master_host != node.info.master_host || master_port != node.info.master_port)) {
           master_conflict = true;
         }
         master_host = node.info.master_host;
