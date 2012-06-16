@@ -43,10 +43,15 @@ function RedisHAClient(nodeList, options) {
   this.subscriptions = {};
   this.psubscriptions = {};
   this.ready = false;
+  this.on('connect', function() {
+    this.host = this.master.host;
+    this.port = this.master.port;
+  });
   this.on('ready', function() {
     this.ready = true;
     this.orientating = false;
     log('ready, using ' + this.master + ' as master');
+    this.server_info = this.master.info;
     this.designateSubSlave();
     this.drainQueue();
   });
@@ -373,6 +378,7 @@ RedisHAClient.prototype.orientate = function() {
     }
     else {
       self.master = masters.pop();
+      self.emit('connect');
       self.emit('ready');
     }
   });
@@ -504,11 +510,13 @@ RedisHAClient.prototype.failover = function() {
             log('publishing gossip:master for ' + self.master.toString());
             self.master.client.publish('haredis:gossip:master', self.master.toString());
             self.orientating = false;
+            self.emit('connect');
             self.emit('ready');
           });
         }
         else {
           self.orientating = false;
+          self.emit('connect');
           self.emit('ready');
         }
       });
