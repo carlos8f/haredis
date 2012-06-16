@@ -23,11 +23,14 @@ function RedisHAClient(nodeList, options) {
   this.orientating = false;
   this.nodes = [];
   this.queue = [];
+  this.subscriptions = {};
+  this.psubscriptions = {};
   this.ready = false;
   this.on('ready', function() {
     this.ready = true;
     this.orientating = false;
     console.log('ready, using ' + this.master + ' as master');
+    this.designateSubSlave();
     this.drainQueue();
   });
   this.parseNodeList(nodeList, options);
@@ -49,7 +52,27 @@ commands.forEach(function(k) {
     }
     var preferSlave = false, node;
     k = k.toLowerCase();
-    switch(k) {
+    var self = this;
+    switch (k) {
+      case 'subscribe':
+      case 'unsubscribe':
+      case 'psubscribe':
+      case 'punsubscribe':
+        // Maintain a hash of subscriptions, so we can move subscriptions around to
+        // different slaves.
+        var type = k[0] == 'p' ? 'psubscriptions' : 'subscriptions';
+        var unsub = k.indexOf('unsub') !== -1;
+        for (i in args) {
+          if (typeof args[i] == 'string') {
+            if (unsub) {
+              delete this[type][args[i]];
+            }
+            else {
+              this[type][args[i]] = true;
+            }
+          }
+        }
+        return this.subSlave.subClient[k].apply(this.subSlave.subClient, args);
       case 'bitcount':
       case 'get':
       case 'getbit':
@@ -65,20 +88,16 @@ commands.forEach(function(k) {
       case 'llen':
       case 'lrange':
       case 'mget':
-      case 'psubscribe':
       case 'pttl':
-      case 'punsubscribe':
       case 'scard':
       case 'sinter':
       case 'sismember':
       case 'smembers':
       case 'srandmember':
       case 'strlen':
-      case 'subscribe':
       case 'sunion':
       case 'ttl':
       case 'type':
-      case 'unsubscribe':
       case 'zcard':
       case 'zrange':
       case 'zrangebyscore':
@@ -98,7 +117,6 @@ commands.forEach(function(k) {
     }
     else {
       // For write operations, increment an op counter, to judge freshness of slaves.
-      var self = this;
       this.master.client.INCR('haredis:opcounter', function(err, reply) {
         if (err) {
           // Emitting an error on master will cause failover!
@@ -109,12 +127,52 @@ commands.forEach(function(k) {
     if (!node) {
       node = this.master;
     }
-    if (k == 'subscribe') {
-      console.log('subscribing to ' + args[0] + ' on ' + node);
-    }
     return node.client[k].apply(node.client, args);
   };
 });
+
+RedisHAClient.prototype.designateSubSlave = function() {
+  var self = this;
+  if (this.subSlave) {
+    if (this.subSlave.status == 'up') {
+      if (!this.isMaster(this.subSlave)) {
+        return console.log('still using ' + this.subSlave + ' as subSlave');
+      }
+      else if (this.slaves.length) {
+        console.log('renegotating subSlave away from master');
+        unsubscribe(this.subSlave);
+      }
+    }
+    else {
+      console.log('subSlave went down, regenotiating');
+    }
+  }
+  var node = this.randomSlave();
+  if (node) {
+    console.log('now using ' + node + ' as subSlave');
+  }
+  else {
+    node = this.master;
+    console.log('now using master as subSlave');
+  }
+
+  self.subSlave = node;
+  Object.keys(this.subscriptions).forEach(function(channel) {
+    self.subSlave.subClient.subscribe(channel);
+  });
+  Object.keys(this.psubscriptions).forEach(function(channel) {
+    self.subSlave.subClient.psubscribe(channel);
+  });
+  
+  function unsubscribe(node) {
+    Object.keys(self.subscriptions).forEach(function(channel) {
+      node.subClient.unsubscribe(channel);
+    });
+    Object.keys(self.psubscriptions).forEach(function(channel) {
+      node.subClient.punsubscribe(channel);
+    });
+  }
+};
 
 RedisHAClient.prototype.drainQueue = function() {
   if (this.ready && this.queue.length) {
@@ -163,7 +221,12 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
       }
     });
     node.on('down', function() {
-      console.log(this + ' is down');
+      if (self.isMaster(this)) {
+        console.warn('MASTER is down! (' + this + ')');
+      }
+      else {
+        console.warn(this + ' is down!');
+      }
       if (self.responded.length == nodeList.length) {
         self.orientate();
       }
@@ -174,26 +237,36 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
     node.on('error', function(err) {
       console.warn(err);
     });
-    node.on('gossip:master', function(key) {
-      if (!self.ready && !self.orientating) {
-        var node = self.nodeFromKey(key);
-        if (!node) {
-          return console.log('gossip said ' + key + " was promoted, but can't find record of it...");
-        }
-        if (node.status == 'up') {
-          console.log('gossip said ' + node + ' was promoted, switching to it. woohoo!');
-          self.master = node;
-          self.master.role = 'master';
-          self.emit('ready');
-        }
-        else {
-          // Hasten reconnect
-          if (node.client.retry_timer) {
-            clearInterval(node.client.retry_timer);
+    node.on('subscribe', function(channel, subscribers) {
+      if (channel != 'haredis:gossip:master') {
+        self.emit('subscribe', channel, subscribers);
+      }
+    });
+    node.on('message', function(channel, message) {
+      if (channel == 'haredis:gossip:master') {
+        if (!self.ready && !self.orientating && (!self.master || self.master.toString() != message)) {
+          var node = self.nodeFromKey(message);
+          if (!node) {
+            return console.log('gossip said ' + key + " was promoted, but can't find record of it...");
           }
-          console.log('gossip said ' + node + ' was promoted, hastening reconnect');
-          node.client.stream.connect(node.port, node.host);
+          if (node.status == 'up') {
+            console.log('gossip said ' + node + ' was promoted, switching to it. woohoo!');
+            self.master = node;
+            self.master.role = 'master';
+            self.emit('ready');
+          }
+          else {
+            // Hasten reconnect
+            if (node.client.retry_timer) {
+              clearInterval(node.client.retry_timer);
+            }
+            console.log('gossip said ' + node + ' was promoted, hastening reconnect');
+            node.client.stream.connect(node.port, node.host);
+          }
         }
+      }
+      else {
+        self.emit('message', channel, message);
       }
     });
     self.nodes.push(node);
@@ -204,7 +277,7 @@ RedisHAClient.prototype.orientate = function() {
   if (this.orientating) {
     return;
   }
-  console.log('orientating...');
+  console.log('orientating (' + this.up.length + '/' + this.nodes.length + ' nodes up) ...');
   this.orientating = true;
   if (this.retryInterval) {
     clearInterval(this.retryInterval);
@@ -212,7 +285,7 @@ RedisHAClient.prototype.orientate = function() {
   var tasks = [], self = this;
   this.ready = false;
   if ((this.up.length / this.down.length) <= 0.5) {
-    console.log("refusing to orientate without a majority up! (" + this.up.length + '/' + this.nodes.length + ')');
+    console.log('refusing to orientate without a majority up!');
     return this.reorientate();
   }
   this.up.forEach(function(node) {
@@ -397,8 +470,6 @@ RedisHAClient.prototype.failover = function() {
         }
         self.master = winner;
         self.master.role = 'master';
-        self.orientating = false;
-        self.emit('ready');
 
         var tasks = [];
         self.up.forEach(function(node) {
@@ -415,7 +486,13 @@ RedisHAClient.prototype.failover = function() {
             }
             console.log('publishing gossip:master for ' + self.master.toString());
             self.master.client.publish('haredis:gossip:master', self.master.toString());
+            self.orientating = false;
+            self.emit('ready');
           });
+        }
+        else {
+          self.orientating = false;
+          self.emit('ready');
         }
       });
     }

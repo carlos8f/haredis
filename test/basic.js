@@ -2,7 +2,7 @@ var redis = require('../')
   , uuid = require('../lib/uuid')
   ;
 
-var client = redis.createClient([6379, 6380, 6381]);
+var client = redis.createClient([6380, 6381, 6382]);
 
 var cmd_per_sec = 0;
 var err_per_sec = 0;

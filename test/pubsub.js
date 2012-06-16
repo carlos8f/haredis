@@ -1,0 +1,43 @@
+var redis = require('../')
+  , uuid = require('../lib/uuid')
+  ;
+
+var nodes = [6380, 6381, 6382];
+var client = redis.createClient(nodes);
+var subClient = redis.createClient(nodes);
+
+subClient.on('subscribe', function(channel, count) {
+  console.log('subscribed to ' + channel + ' on ' + subClient.subSlave + ' (' + count + ' subs)');
+});
+subClient.subscribe('mychannel', function(err, reply) {
+  if (err) {
+    return console.error(err);
+  }
+});
+
+var msg_per_sec = 0, pub_per_sec = 0, err_per_sec = 0;
+subClient.on('message', function(channel, message) {
+  msg_per_sec++;
+});
+
+setInterval(function() {
+  var id = uuid();
+  client.publish('mychannel', id, function(err, reply) {
+    if (err) {
+      err_per_sec++;
+      return console.error(err);
+    }
+    pub_per_sec++;
+  });
+ }, 20);
+
+setInterval(function() {
+  console.log(msg_per_sec + ' messages received');
+  msg_per_sec = 0;
+  console.log(pub_per_sec + ' publishes');
+  pub_per_sec = 0;
+  if (err_per_sec) {
+    console.log(err_per_sec + ' errors');
+    err_per_sec = 0;
+  }
+}, 1000);
