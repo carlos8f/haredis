@@ -170,6 +170,28 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
     node.on('error', function(err) {
       console.warn(err);
     });
+    node.on('gossip:master', function(key) {
+      if (!self.ready && !self.orientating) {
+        var node = self.nodeFromKey(key);
+        if (!node) {
+          return console.log('gossip said ' + key + " was promoted, but can't find record of it...");
+        }
+        if (node.status == 'up') {
+          console.log('gossip said ' + node + ' was promoted, switching to it. woohoo!');
+          self.master = node;
+          self.master.role = 'master';
+          self.emit('ready');
+        }
+        else {
+          // Hasten reconnect
+          if (node.client.retry_timer) {
+            clearInterval(node.client.retry_timer);
+          }
+          console.log('gossip said ' + node + ' was promoted, hastening reconnect');
+          node.client.stream.connect(node.port, node.host);
+        }
+      }
+    });
     self.nodes.push(node);
   });
 };
@@ -262,7 +284,7 @@ RedisHAClient.prototype.orientate = function() {
   });
 };
 
-RedisHAClient.prototype.makeSlave = function(node) {
+RedisHAClient.prototype.makeSlave = function(node, cb) {
   if (!this.master) {
     return console.error("can't make " + node + " a slave of unknown master!");
   }
@@ -272,10 +294,11 @@ RedisHAClient.prototype.makeSlave = function(node) {
   console.log('making ' + node + ' into a slave...');
   node.client.SLAVEOF(this.master.host, this.master.port, function(err, reply) {
     if (err) {
-      return console.error(err, 'error setting slaveof');
+      return cb(err);
     }
     node.role = 'slave';
     console.log(node + ' is slave');
+    cb();
   });
 };
 
@@ -288,20 +311,18 @@ RedisHAClient.prototype.failover = function() {
   var id = uuid();
   console.log('my failover id: ' + id);
   var self = this;
+  // We can't use a regular EXPIRE call because of a bug in redis which prevents
+  // slaves from expiring keys correctly.
+  var lock_time = 5000;
   this.up.forEach(function(node) {
     tasks.push(function(cb) {
       node.client.MULTI()
-        .SETNX('haredis:failover', id)
+        .SETNX('haredis:failover', id + ':' + Date.now())
         .GET('haredis:failover', function(err, reply) {
-          if (reply != id) {
-            return cb(new Error('failover already in progress: ' + reply));
+          reply = reply.split(':');
+          if (reply[0] != id && (Date.now() - reply[1] < lock_time)) {
+            return cb(new Error('failover already in progress: ' + reply[0]));
           }
-          // set a shortish ttl on the lock
-          node.client.EXPIRE('haredis:failover', 5, function(err) {
-            if (err) {
-              console.error(err, 'error setting ttl on lock');
-            }
-          });
         })
         .EXEC(function(err, replies) {
           if (err) {
@@ -310,6 +331,12 @@ RedisHAClient.prototype.failover = function() {
             cb(null, node);
           }
           else {
+            // set a shortish ttl on the lock
+            node.client.EXPIRE('haredis:failover', 5, function(err) {
+              if (err) {
+                console.error(err, 'error setting ttl on lock');
+              }
+            });
             node.client.GET('haredis:opcounter', function(err, opcounter) {
               if (err) {
                 console.error(err, 'error getting opcounter');
@@ -326,20 +353,21 @@ RedisHAClient.prototype.failover = function() {
     });
   });
   async.parallel(tasks, function(err, results) {
+    if (results.length) {
+      console.log('unlocking nodes after ' + (err ? 'unsuccessful' : 'successful') + ' lock...');
+      results.forEach(function(node) {
+        if (node) {
+          node.client.DEL('haredis:failover', function(err) {
+            if (err) {
+              return console.error(err, 'error unlocking ' + node);
+            }
+            console.log('unlocked ' + node);
+          });
+        }
+      });
+    }
     if (err) {
-      if (results) {
-        console.log('rolling back locked nodes...');
-        results.forEach(function(node) {
-          if (node) {
-            node.client.DEL('haredis:failover', function(err) {
-              if (err) {
-                return console.error(err, 'error rolling back ' + node);
-              }
-              console.log('rolled back ' + node);
-            });
-          }
-        });
-      }
+      console.warn(err);
       return self.reorientate();
     }
     else {
@@ -368,11 +396,23 @@ RedisHAClient.prototype.failover = function() {
         self.orientating = false;
         self.emit('ready');
 
+        var tasks = [];
         self.up.forEach(function(node) {
           if (!self.isMaster(node)) {
-            self.makeSlave(node);
+            tasks.push(function(cb) {
+              self.makeSlave(node, cb);
+            });
           }
         });
+        if (tasks.length) {
+          async.parallel(tasks, function(err) {
+            if (err) {
+              return console.error(err, 'error making slave!');
+            }
+            console.log('publishing gossip:master for ' + self.master.toString());
+            self.master.client.publish('haredis:gossip:master', self.master.toString());
+          });
+        }
       });
     }
   });
