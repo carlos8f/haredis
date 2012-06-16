@@ -46,6 +46,7 @@ function RedisHAClient(nodeList, options) {
   this.on('connect', function() {
     this.host = this.master.host;
     this.port = this.master.port;
+    this.reply_parser = this.master.client.reply_parser;
   });
   this.on('ready', function() {
     this.ready = true;
