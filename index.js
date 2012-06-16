@@ -48,7 +48,8 @@ commands.forEach(function(k) {
       return;
     }
     var preferSlave = false, node;
-    switch(k.toLowerCase()) {
+    k = k.toLowerCase();
+    switch(k) {
       case 'bitcount':
       case 'get':
       case 'getbit':
@@ -107,6 +108,9 @@ commands.forEach(function(k) {
     }
     if (!node) {
       node = this.master;
+    }
+    if (k == 'subscribe') {
+      console.log('subscribing to ' + args[0] + ' on ' + node);
     }
     return node.client[k].apply(node.client, args);
   };
