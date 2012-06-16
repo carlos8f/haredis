@@ -96,6 +96,15 @@ commands.forEach(function(k) {
           }
         }
         return this.subSlave.subClient[k].apply(this.subSlave.subClient, args);
+      case 'select':
+        // Need to execute on all nodes.
+        // Execute on master first in case there is a callback.
+        this.master.client[k].apply(this.master.client, args);
+        // Execute on slaves without a callback.
+        this.slaves.forEach(function(node) {
+          node.client[k].apply(node.client, [args[0]]);
+        });
+        break;
       case 'bitcount':
       case 'get':
       case 'getbit':
