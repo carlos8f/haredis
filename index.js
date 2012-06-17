@@ -130,10 +130,10 @@ commands.forEach(function(k) {
         // Need to execute on all nodes.
         // Execute on master first in case there is a callback.
         this.selected_db = parseInt(args[0]);
-        callCommand(this.master, k, args);
+        callCommand(this.master.client, k, args);
         // Execute on slaves without a callback.
         this.slaves.forEach(function(node) {
-          callCommand(node, k, [args[0]]);
+          callCommand(node.client, k, [args[0]]);
         });
         return;
       case 'quit':
@@ -153,21 +153,19 @@ commands.forEach(function(k) {
         return;
     }
 
-    var node;
+    var client, node;
     if (this.slaveOk(k)) {
-      node = this.randomSlave();
+      if (node = this.randomSlave()) {
+        client = node.client;
+      }
     }
 
-    callCommand(node, k, args);
+    callCommand(client, k, args);
 
     function callCommand(client, command, args) {
       self._slaveOk = false;
       if (!client) {
         client = self.master.client;
-      }
-      else if (client.client) {
-        // Passed a node instead of a client
-        client = client.client;
       }
       client[command].apply(client, args);
       // Incrememnt opcounter if necessary.
