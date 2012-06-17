@@ -21,21 +21,25 @@ exports.print = redis.print;
 
 function log(message, label) {
   if (exports.debug_mode) {
-    console.log(message, label);
+    console.log.apply(null, arguments);
   }
 }
 function warn(message, label) {
   if (exports.debug_mode) {
-    console.warn(message, label);
+    console.log.apply(null, arguments);
   }
 }
 function error(message, label) {
   if (exports.debug_mode) {
-    console.error(message, label);
+    console.log.apply(null, arguments);
   }
 }
 
 function RedisHAClient(nodeList, options) {
+  if (!util.isArray(nodeList) || (typeof options != 'undefined' && typeof options != 'object')) {
+    throw new Error('error (haredis) invalid createClient() arguments. Must call createClient(array, [object])');
+  }
+  var self = this;
   EventEmitter.call(this);
   options = options || {};
   this.retryTimeout = options.retryTimeout || default_retry_timeout;
@@ -45,7 +49,16 @@ function RedisHAClient(nodeList, options) {
   this.subscriptions = {};
   this.psubscriptions = {};
   this.selected_db = 0;
-  this.haredis_db_num = options.haredis_db_num = typeof options.haredis_db_num != 'undefined' ? options.haredis_db_num : 15;
+  this.options = {};
+  Object.keys(options).forEach(function(k) {
+    self.options[k] = options[k];
+  });
+  if (typeof this.options.haredis_db_num == 'undefined') {
+    this.options.haredis_db_num = 15;
+  }
+  if (typeof this.options.socket_nodelay == 'undefined') {
+    this.options.socket_nodelay = true;
+  }
   this.ready = false;
   this.slaveOk = false;
   this.on('connect', function() {
@@ -62,7 +75,7 @@ function RedisHAClient(nodeList, options) {
     this.designateSubSlave();
     this.drainQueue();
   });
-  this.parseNodeList(nodeList, options);
+  this.parseNodeList(nodeList, this.options);
 }
 util.inherits(RedisHAClient, EventEmitter);
 
@@ -118,6 +131,11 @@ commands.forEach(function(k) {
         // Execute on slaves without a callback.
         this.slaves.forEach(function(node) {
           callCommand(node, k, [args[0]]);
+        });
+        return;
+      case 'quit':
+        this.up.forEach(function(node) {
+          node.quit();
         });
         return;
     }
@@ -450,6 +468,7 @@ RedisHAClient.prototype.failover = function() {
   if (this.ready) {
     return log('ignoring failover while ready');
   }
+  this.emit('reconnecting', {});
   log('attempting failover!');
   var tasks = [];
   var id = uuid();
@@ -461,31 +480,43 @@ RedisHAClient.prototype.failover = function() {
   var was_error = false;
   this.up.forEach(function(node) {
     tasks.push(function(cb) {
-      if (self.selected_db == self.haredis_db_num) {
+      if (self.selected_db == self.options.haredis_db_num) {
         // If we are in the haredis_db_num, ignore this.
         return cb();
       }
       // Switch to the opcounter db.
-      node.client.SELECT(self.haredis_db_num, cb);
+      node.client.SELECT(self.options.haredis_db_num, function(err) {
+        if (err) {
+          error(err, 'error switching to opcounter db');
+          was_error = true;
+        }
+        cb();
+      });
     });
     tasks.push(function(cb) {
+      if (was_error) {
+        return cb();
+      }
       node.client.MULTI()
         .SETNX('haredis:failover', id + ':' + Date.now())
         .GET('haredis:failover', function(err, reply) {
           reply = reply.split(':');
           if (reply[0] != id && (Date.now() - reply[1] < lock_time)) {
             warn('failover already in progress: ' + reply[0]);
-            // Don't pass the error, so parallel() can continue.
+            // Don't pass the error, so series() can continue.
             was_error = true;
-            return cb(null, node);
+            return cb();
           }
         })
         .EXEC(function(err, replies) {
+          if (was_error) {
+            return;
+          }
           if (err) {
             error(err, 'error locking node');
-            // Don't pass the error, so parallel() can continue.
+            // Don't pass the error, so series() can continue.
             was_error = true;
-            return cb(null, node);
+            return cb();
           }
           else {
             // set a shortish ttl on the lock. Note that this doesn't actually work...
@@ -500,30 +531,35 @@ RedisHAClient.prototype.failover = function() {
                 error(err, 'error getting opcounter');
                 // Don't pass the error, so parallel() can continue.
                 was_error = true;
-                return cb(null, node);
               }
               else {
                 node.opcounter = opcounter;
-                return cb(null, node);
               }
+              cb(null, node);
             });
           }
         });
     });
-  });
-  tasks.push(function(cb) {
-    if (self.selected_db == self.haredis_db_num) {
-      // If we are in the haredis_db_num, ignore this.
-      return cb();
-    }
-    // Switch to the normal db.
-    node.client.SELECT(self.selected_db, cb);
+    tasks.push(function(cb) {
+      if (self.selected_db == self.options.haredis_db_num) {
+        // If we are in the haredis_db_num, ignore this.
+        return cb();
+      }
+      // Switch to the normal db.
+      node.client.SELECT(self.selected_db, function(err) {
+        if (err) {
+          error(err, 'error switching from opcounter db');
+          was_error = true;
+        }
+        cb();
+      });
+    });
   });
   async.series(tasks, function(err, results) {
     if (results.length) {
       log('unlocking nodes after ' + (err ? 'unsuccessful' : 'successful') + ' lock...');
       results.forEach(function(node) {
-        if (node) {
+        if (node && node.client) {
           node.client.DEL('haredis:failover', function(err) {
             if (err) {
               return error(err, 'error unlocking ' + node);
@@ -536,15 +572,17 @@ RedisHAClient.prototype.failover = function() {
     if (err) {
       warn(err);
     }
-    if (was_err) {
+    if (was_error) {
       return self.reorientate();
     }
     else {
       // We've succeeded in locking all the nodes. Now elect our new master...
       var winner;
       results.forEach(function(node) {
-        if (!winner || node.opcounter > winner.opcounter) {
-          winner = node;
+        if (node) {
+          if (!winner || node.opcounter > winner.opcounter) {
+            winner = node;
+          }
         }
       });
       if (winner) {
