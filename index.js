@@ -50,6 +50,7 @@ function RedisHAClient(nodeList, options) {
     this.host = this.master.host;
     this.port = this.master.port;
     this.reply_parser = this.master.client.reply_parser;
+    this.send_command = this.master.client.send_command.bind(this.master.client);
   });
   this.on('ready', function() {
     this.ready = true;
@@ -70,6 +71,11 @@ commands.forEach(function(k) {
 commands.forEach(function(k) {
   RedisHAClient.prototype[k] = function() {
     var args = Array.prototype.slice.call(arguments);
+    var self = this;
+    k = k.toLowerCase();
+    if (k == 'multi') {
+      return new redis.Multi(this, args[0]);
+    }
     if (!this.ready) {
       // @todo: create a custom multi() method which can return a chainable thing
       // instead here.
@@ -77,8 +83,7 @@ commands.forEach(function(k) {
       return;
     }
     var preferSlave = false, node;
-    k = k.toLowerCase();
-    var self = this;
+
     switch (k) {
       case 'subscribe':
       case 'unsubscribe':
