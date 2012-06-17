@@ -89,7 +89,7 @@ commands.forEach(function(k) {
       this.queue.push([k, args]);
       return;
     }
-    var isRead = false;
+    var isRead = self.isRead(k, args);
 
     switch (k) {
       case 'subscribe':
@@ -121,44 +121,6 @@ commands.forEach(function(k) {
           callCommand(node, k, [args[0]]);
         });
         return;
-      case 'bitcount':
-      case 'get':
-      case 'getbit':
-      case 'getrange':
-      case 'hget':
-      case 'hgetall':
-      case 'hkeys':
-      case 'hlen':
-      case 'hmget':
-      case 'hvals':
-      case 'keys':
-      case 'lindex':
-      case 'llen':
-      case 'lrange':
-      case 'mget':
-      case 'pttl':
-      case 'scard':
-      case 'sinter':
-      case 'sismember':
-      case 'smembers':
-      case 'srandmember':
-      case 'strlen':
-      case 'sunion':
-      case 'ttl':
-      case 'type':
-      case 'zcard':
-      case 'zrange':
-      case 'zrangebyscore':
-      case 'zrank':
-      case 'zrevrange':
-      case 'zrevrangebyscore':
-      case 'zrevrank':
-      case 'zscore':
-        isRead = true;
-        break;
-      case 'sort':
-        // @todo: parse to see if "store" is used
-        break;
     }
 
     var node;
@@ -192,6 +154,49 @@ commands.forEach(function(k) {
     }
   };
 });
+
+RedisHAClient.prototype.isRead = function(command, args) {
+  switch (command.toLowerCase()) {
+    case 'bitcount':
+    case 'get':
+    case 'getbit':
+    case 'getrange':
+    case 'hget':
+    case 'hgetall':
+    case 'hkeys':
+    case 'hlen':
+    case 'hmget':
+    case 'hvals':
+    case 'keys':
+    case 'lindex':
+    case 'llen':
+    case 'lrange':
+    case 'mget':
+    case 'pttl':
+    case 'scard':
+    case 'sinter':
+    case 'sismember':
+    case 'smembers':
+    case 'srandmember':
+    case 'strlen':
+    case 'sunion':
+    case 'ttl':
+    case 'type':
+    case 'zcard':
+    case 'zrange':
+    case 'zrangebyscore':
+    case 'zrank':
+    case 'zrevrange':
+    case 'zrevrangebyscore':
+    case 'zrevrank':
+    case 'zscore':
+      return true;
+    case 'sort':
+      // @todo: parse to see if "store" is used
+      return false;
+    default: return false;
+  }
+};
 
 RedisHAClient.prototype.incrOpcounter = function(done) {
   var self = this;
