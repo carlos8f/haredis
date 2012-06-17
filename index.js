@@ -44,8 +44,8 @@ function RedisHAClient(nodeList, options) {
   this.queue = [];
   this.subscriptions = {};
   this.psubscriptions = {};
-  this.db_num = 0;
-  this.opcounter_db_num = options.opcounter_db_num ? options.opcounter_db_num : 0;
+  this.selected_db = 0;
+  this.haredis_db_num = options.haredis_db_num = typeof options.haredis_db_num != 'undefined' ? options.haredis_db_num : 15;
   this.ready = false;
   this.slaveOk = false;
   this.on('connect', function() {
@@ -89,7 +89,6 @@ commands.forEach(function(k) {
       this.queue.push([k, args]);
       return;
     }
-    var isRead = self.isRead(k, args);
 
     switch (k) {
       case 'subscribe':
@@ -114,7 +113,7 @@ commands.forEach(function(k) {
       case 'select':
         // Need to execute on all nodes.
         // Execute on master first in case there is a callback.
-        this.db_num = parseInt(args[0]);
+        this.selected_db = parseInt(args[0]);
         callCommand(this.master, k, args);
         // Execute on slaves without a callback.
         this.slaves.forEach(function(node) {
@@ -125,19 +124,19 @@ commands.forEach(function(k) {
 
     var node;
 
-    if (isRead) {
+    if (self.isRead(k, args)) {
       if (this.slaveOk) {
         node = this.randomSlave();
       }
       callCommand(node, k, args);
     }
     else {
-      self.incrOpcounter(function(err) {
+      callCommand(node, k, args);
+      self.master.incrOpcounter(function(err) {
         if (err) {
           // Will trigger failover!
-          return self.master.client.emit('err', err);
+          return self.master.emit('err', err);
         }
-        callCommand(node, k, args);
       });
     }
 
@@ -195,29 +194,6 @@ RedisHAClient.prototype.isRead = function(command, args) {
       // @todo: parse to see if "store" is used
       return false;
     default: return false;
-  }
-};
-
-RedisHAClient.prototype.incrOpcounter = function(done) {
-  var self = this;
-  // For write operations, increment an op counter, to judge freshness of slaves.
-  if (this.db_num != this.opcounter_db_num) {
-    // Temporarily switch to a designated db (opcounter_db_num) to store counter.
-    var tasks = [
-      function(cb) {
-        self.master.client.SELECT(self.opcounter_db_num, cb);
-      },
-      function(cb) {
-        self.master.client.INCR('haredis:opcounter', cb);
-      },
-      function(cb) {
-        self.master.client.SELECT(self.db_num, cb);
-      }
-    ];
-    async.series(tasks, done);
-  }
-  else {
-    self.master.client.INCR('haredis:opcounter', done);
   }
 };
 
@@ -282,7 +258,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
   var self = this;
   nodeList.forEach(function(n) {
     if (typeof n == 'object') {
-      options = n;
+      spec = n;
     }
     else {
       if (typeof n == 'number') {
@@ -482,45 +458,68 @@ RedisHAClient.prototype.failover = function() {
   // We can't use a regular EXPIRE call because of a bug in redis which prevents
   // slaves from expiring keys correctly.
   var lock_time = 5000;
+  var was_error = false;
   this.up.forEach(function(node) {
+    tasks.push(function(cb) {
+      if (self.selected_db == self.haredis_db_num) {
+        // If we are in the haredis_db_num, ignore this.
+        return cb();
+      }
+      // Switch to the opcounter db.
+      node.client.SELECT(self.haredis_db_num, cb);
+    });
     tasks.push(function(cb) {
       node.client.MULTI()
         .SETNX('haredis:failover', id + ':' + Date.now())
         .GET('haredis:failover', function(err, reply) {
           reply = reply.split(':');
           if (reply[0] != id && (Date.now() - reply[1] < lock_time)) {
-            return cb(new Error('failover already in progress: ' + reply[0]));
+            warn('failover already in progress: ' + reply[0]);
+            // Don't pass the error, so parallel() can continue.
+            was_error = true;
+            return cb(null, node);
           }
         })
         .EXEC(function(err, replies) {
           if (err) {
             error(err, 'error locking node');
             // Don't pass the error, so parallel() can continue.
-            cb(null, node);
+            was_error = true;
+            return cb(null, node);
           }
           else {
-            // set a shortish ttl on the lock
+            // set a shortish ttl on the lock. Note that this doesn't actually work...
             node.client.EXPIRE('haredis:failover', 5, function(err) {
               if (err) {
                 error(err, 'error setting ttl on lock');
               }
             });
+
             node.client.GET('haredis:opcounter', function(err, opcounter) {
               if (err) {
                 error(err, 'error getting opcounter');
                 // Don't pass the error, so parallel() can continue.
-                cb(null, node);
+                was_error = true;
+                return cb(null, node);
               }
               else {
                 node.opcounter = opcounter;
-                cb(null, node);
+                return cb(null, node);
               }
             });
           }
         });
     });
   });
-  async.parallel(tasks, function(err, results) {
+  tasks.push(function(cb) {
+    if (self.selected_db == self.haredis_db_num) {
+      // If we are in the haredis_db_num, ignore this.
+      return cb();
+    }
+    // Switch to the normal db.
+    node.client.SELECT(self.selected_db, cb);
+  });
+  async.series(tasks, function(err, results) {
     if (results.length) {
       log('unlocking nodes after ' + (err ? 'unsuccessful' : 'successful') + ' lock...');
       results.forEach(function(node) {
@@ -536,6 +535,8 @@ RedisHAClient.prototype.failover = function() {
     }
     if (err) {
       warn(err);
+    }
+    if (was_err) {
       return self.reorientate();
     }
     else {

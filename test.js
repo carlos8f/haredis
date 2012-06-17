@@ -340,7 +340,7 @@ tests.WATCH_MULTI = function () {
 };
 
 tests.detect_buffers = function () {
-    var name = "detect_buffers", detect_client = redis.createClient(null, null, {detect_buffers: true});
+    var name = "detect_buffers", detect_client = redis.createClient(nodes, {detect_buffers: true});
 
     detect_client.on("ready", function () {
         // single Buffer or String
@@ -398,9 +398,9 @@ tests.detect_buffers = function () {
 tests.socket_nodelay = function () {
     var name = "socket_nodelay", c1, c2, c3, ready_count = 0, quit_count = 0;
 
-    c1 = redis.createClient(null, null, {socket_nodelay: true});
-    c2 = redis.createClient(null, null, {socket_nodelay: false});
-    c3 = redis.createClient(null, null);
+    c1 = redis.createClient(nodes, {socket_nodelay: true});
+    c2 = redis.createClient(nodes, {socket_nodelay: false});
+    c3 = redis.createClient(nodes);
 
     function quit_check() {
         quit_count++;
