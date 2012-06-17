@@ -343,6 +343,7 @@ tests.detect_buffers = function () {
     var name = "detect_buffers", detect_client = redis.createClient(nodes, {detect_buffers: true});
 
     detect_client.on("ready", function () {
+        detect_client.select(test_db_num, require_string("OK", name));
         // single Buffer or String
         detect_client.set("string key 1", "string value");
         detect_client.get("string key 1", require_string("string value", name));
@@ -415,16 +416,19 @@ tests.socket_nodelay = function () {
         assert.strictEqual(false, c2.options.socket_nodelay, name);
         assert.strictEqual(true, c3.options.socket_nodelay, name);
 
+        c1.select(test_db_num, require_string("OK", name));
         c1.set(["set key 1", "set val"], require_string("OK", name));
         c1.set(["set key 2", "set val"], require_string("OK", name));
         c1.get(["set key 1"], require_string("set val", name));
         c1.get(["set key 2"], require_string("set val", name));
 
+        c2.select(test_db_num, require_string("OK", name));
         c2.set(["set key 3", "set val"], require_string("OK", name));
         c2.set(["set key 4", "set val"], require_string("OK", name));
         c2.get(["set key 3"], require_string("set val", name));
         c2.get(["set key 4"], require_string("set val", name));
 
+        c3.select(test_db_num, require_string("OK", name));
         c3.set(["set key 5", "set val"], require_string("OK", name));
         c3.set(["set key 6", "set val"], require_string("OK", name));
         c3.get(["set key 5"], require_string("set val", name));
