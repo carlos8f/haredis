@@ -3,6 +3,7 @@ var redis = require('redis')
   , EventEmitter = require('events').EventEmitter
   , Node = require('./lib/node')
   , HAMulti = require('./lib/multi')
+  , connection_id = 0
   , default_port = 6379
   , default_host = '127.0.0.1'
   , default_retry_timeout = 1000
@@ -19,22 +20,6 @@ exports.createClient = createClient;
 exports.debug_mode = false;
 exports.print = redis.print;
 
-function log(message, label) {
-  if (exports.debug_mode) {
-    console.log.apply(null, arguments);
-  }
-}
-function warn(message, label) {
-  if (exports.debug_mode) {
-    console.log.apply(null, arguments);
-  }
-}
-function error(message, label) {
-  if (exports.debug_mode) {
-    console.log.apply(null, arguments);
-  }
-}
-
 function RedisHAClient(nodeList, options) {
   if (!util.isArray(nodeList) || (typeof options != 'undefined' && typeof options != 'object')) {
     throw new Error('error (haredis) invalid createClient() arguments. Must call createClient(array, [object])');
@@ -44,6 +29,7 @@ function RedisHAClient(nodeList, options) {
   options = options || {};
   this.retryTimeout = options.retryTimeout || default_retry_timeout;
   this.orientating = false;
+  this.connection_id = ++connection_id;
   this.nodes = [];
   this.queue = [];
   this.subscriptions = {};
@@ -67,17 +53,47 @@ function RedisHAClient(nodeList, options) {
     this.reply_parser = this.master.client.reply_parser;
     this.send_command = this.master.client.send_command.bind(this.master.client);
   });
-  this.on('ready', function() {
-    this.ready = true;
-    this.orientating = false;
-    log('ready, using ' + this.master + ' as master');
-    this.server_info = this.master.info;
-    this.designateSubSlave();
-    this.drainQueue();
-  });
   this.parseNodeList(nodeList, this.options);
 }
 util.inherits(RedisHAClient, EventEmitter);
+
+RedisHAClient.prototype.log = function(message, label) {
+  if (exports.debug_mode) {
+    arguments[0] = this.logFormat('info', message);
+    console.log.apply(null, arguments);
+  }
+};
+RedisHAClient.prototype.warn = function(message, label) {
+  if (exports.debug_mode) {
+    arguments[0] = this.logFormat('warning', message);
+    console.log.apply(null, arguments);
+  }
+};
+RedisHAClient.prototype.error = function(message, label) {
+  if (exports.debug_mode) {
+    arguments[0] = this.logFormat('ERROR', message);
+    console.log.apply(null, arguments);
+  }
+};
+RedisHAClient.prototype.logFormat = function(type, message) {
+  return util.format('[%s](#%d) %s: %s', new Date().toTimeString().split(' ')[0], this.connection_id, type, message);
+};
+
+RedisHAClient.prototype.onReady = function() {
+  var self = this;
+  this.designateSubSlave(function(err) {
+    if (err) {
+      return self.reorientate();
+    }
+    self.ready = true;
+    self.orientating = false;
+    self.log('ready, using ' + self.master + ' as master');
+    self.server_info = self.master.info;
+    self.emit('connect');
+    self.emit('ready');
+    self.drainQueue();
+  });
+};
 
 RedisHAClient.prototype.slaveOk = RedisHAClient.prototype.slaveOK = function(command) {
   if (command) {
@@ -125,6 +141,7 @@ commands.forEach(function(k) {
             }
           }
         }
+        self.log(k + ' on ' + this.subSlave);
         return callCommand(this.subSlave.subClient, k, args);
       case 'select':
         // Need to execute on all nodes.
@@ -137,7 +154,7 @@ commands.forEach(function(k) {
         });
         return;
       case 'quit':
-        log('got quit');
+        self.log('got quit');
         var tasks = [];
         this.up.forEach(function(node) {
           tasks.push(function(cb) {
@@ -146,7 +163,7 @@ commands.forEach(function(k) {
         });
         async.parallel(tasks, function(err, replies) {
           if (typeof args[0] == 'function') {
-            log('done quitting');
+            self.log('done quitting');
             args[0](err);
           }
         });
@@ -156,6 +173,7 @@ commands.forEach(function(k) {
     var client, node;
     if (this.slaveOk(k)) {
       if (node = this.randomSlave()) {
+        self.log(k + ' on ' + node);
         client = node.client;
       }
     }
@@ -165,10 +183,11 @@ commands.forEach(function(k) {
     function callCommand(client, command, args) {
       self._slaveOk = false;
       if (!client) {
+        self.log(command + ' on ' + self.master + ' (master default)');
         client = self.master.client;
       }
       client[command].apply(client, args);
-      // Incrememnt opcounter if necessary.
+      // Increment opcounter if necessary.
       if (!self.isRead(command, args) && command != 'publish') {
         self.master.incrOpcounter(function(err) {
           if (err) {
@@ -224,47 +243,62 @@ RedisHAClient.prototype.isRead = function(command, args) {
   }
 };
 
-RedisHAClient.prototype.designateSubSlave = function() {
-  var self = this;
+RedisHAClient.prototype.designateSubSlave = function(callback) {
+  var self = this, tasks = [];
   if (this.subSlave) {
     if (this.subSlave.status == 'up') {
       if (!this.isMaster(this.subSlave)) {
-        log('still using ' + this.subSlave + ' as subSlave');
+        self.log('still using ' + this.subSlave + ' as subSlave');
       }
       else if (this.slaves.length) {
-        log('renegotating subSlave away from master');
-        unsubscribe(this.subSlave);
+        self.log('renegotating subSlave away from master');
+        var oldSubSlave = this.subSlave;
+        Object.keys(self.subscriptions).forEach(function(channel) {
+          tasks.push(function(cb) {
+            self.log('unsubscribing ' + channel + ' on ' + oldSubSlave);
+            oldSubSlave.subClient.unsubscribe(channel, cb);
+          });
+        });
+        Object.keys(self.psubscriptions).forEach(function(pattern) {
+          tasks.push(function(cb) {
+            self.log('punsubscribing ' + pattern + ' on ' + oldSubSlave);
+            oldSubSlave.subClient.punsubscribe(pattern, cb);
+          });
+        });
+        this.subSlave = this.randomSlave();
+        self.log('subSlave is now ' + this.subSlave);
       }
     }
     else {
-      log('subSlave went down, regenotiating');
+      this.subSlave = this.randomSlave();
+      if (this.subSlave) {
+        self.log('subSlave went down, renegotiated to ' + this.subSlave);
+      }
     }
   }
-  var node = this.randomSlave();
-  if (node) {
-    log('now using ' + node + ' as subSlave');
+  else if (this.slaves.length) {
+    this.subSlave = this.randomSlave();
+    self.log('designated ' + this.subSlave + ' as subSlave');
   }
-  else {
-    node = this.master;
-    log('now using master as subSlave');
+  if (!this.subSlave) {
+    this.subSlave = this.master;
+    self.log('defaulting to master as subSlave');
   }
 
-  self.subSlave = node;
   Object.keys(this.subscriptions).forEach(function(channel) {
-    self.subSlave.subClient.subscribe(channel);
-  });
-  Object.keys(this.psubscriptions).forEach(function(channel) {
-    self.subSlave.subClient.psubscribe(channel);
-  });
-  
-  function unsubscribe(node) {
-    Object.keys(self.subscriptions).forEach(function(channel) {
-      node.subClient.unsubscribe(channel);
+    tasks.push(function(cb) {
+      self.log('subscribing ' + channel + ' on ' + self.subSlave);
+      self.subSlave.subClient.subscribe(channel, cb);
     });
-    Object.keys(self.psubscriptions).forEach(function(channel) {
-      node.subClient.punsubscribe(channel);
+  });
+  Object.keys(this.psubscriptions).forEach(function(pattern) {
+    tasks.push(function(cb) {
+      self.log('psubscribing ' + pattern + ' on ' + self.subSlave);
+      self.subSlave.subClient.psubscribe(pattern, cb);
     });
-  }
+  });
+
+  async.parallel(tasks, callback);
 };
 
 RedisHAClient.prototype.drainQueue = function() {
@@ -308,27 +342,27 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
     }
     var node = new Node(spec, options);
     node.on('up', function() {
-      log(this + ' is up');
-      if (self.responded.length == nodeList.length) {
+      self.log(this + ' is up');
+      if (!self.ready && self.responded.length == nodeList.length) {
         self.orientate();
       }
     });
     node.on('down', function() {
       if (self.isMaster(this)) {
-        warn('MASTER is down! (' + this + ')');
+        self.warn('MASTER is down! (' + this + ')');
       }
       else {
-        warn(this + ' is down!');
+        self.warn(this + ' is down!');
       }
       if (self.responded.length == nodeList.length) {
         self.orientate();
       }
       else {
-        log('only ' + self.responded.length + ' responded with ' + nodeList.length + ' in nodeList');
+        self.log('only ' + self.responded.length + ' responded with ' + nodeList.length + ' in nodeList');
       }
     });
     node.on('error', function(err) {
-      warn(err);
+      self.warn(err);
     });
     node.on('subscribe', function(channel, count) {
       if (channel != 'haredis:gossip:master') {
@@ -340,23 +374,24 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
     });
     node.on('message', function(channel, message) {
       if (channel == 'haredis:gossip:master') {
-        if (!self.ready && !self.orientating && (!self.master || self.master.toString() != message)) {
+        self.log('gossip that ' + message + ' was promoted');
+        if (!self.orientating && (!self.master || self.master.toString() != message)) {
           var node = self.nodeFromKey(message);
           if (!node) {
-            return log('gossip said ' + key + " was promoted, but can't find record of it...");
+            return self.log('gossip said ' + message + " was promoted, but can't find record of it...");
           }
           if (node.status == 'up') {
-            log('gossip said ' + node + ' was promoted, switching to it. woohoo!');
+            self.log('gossip said ' + node + ' was promoted, switching to it. woohoo!');
             self.master = node;
             self.master.role = 'master';
-            self.emit('ready');
+            self.onReady();
           }
           else {
             // Hasten reconnect
             if (node.client.retry_timer) {
               clearInterval(node.client.retry_timer);
             }
-            log('gossip said ' + node + ' was promoted, hastening reconnect');
+            self.log('gossip said ' + node + ' was promoted, hastening reconnect');
             node.client.stream.connect(node.port, node.host);
           }
         }
@@ -370,18 +405,19 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
 };
 
 RedisHAClient.prototype.orientate = function() {
+  var self = this;
   if (this.orientating) {
     return;
   }
-  log('orientating (' + this.up.length + '/' + this.nodes.length + ' nodes up) ...');
+  self.log('orientating (' + this.up.length + '/' + this.nodes.length + ' nodes up) ...');
   this.orientating = true;
   if (this.retryInterval) {
     clearInterval(this.retryInterval);
   }
-  var tasks = [], self = this;
+  var tasks = [];
   this.ready = false;
   if ((this.up.length / this.down.length) <= 0.5) {
-    log('refusing to orientate without a majority up!');
+    self.log('refusing to orientate without a majority up!');
     return this.reorientate();
   }
   this.up.forEach(function(node) {
@@ -419,7 +455,7 @@ RedisHAClient.prototype.orientate = function() {
   });
   async.parallel(tasks, function(err, nodes) {
     if (err) {
-      warn(err);
+      self.warn(err);
       return self.reorientate();
     }
     var masters = []
@@ -443,49 +479,49 @@ RedisHAClient.prototype.orientate = function() {
     });
     if (masters.length != 1) {
       // Resolve multiple/no masters
-      warn('invalid master count: ' + masters.length);
+      self.warn('invalid master count: ' + masters.length);
       self.failover();
     }
     else if (slaves.length && (master_conflict || master_host != masters[0].host || master_port != masters[0].port)) {
-      warn('master conflict detected');
+      self.warn('master conflict detected');
       self.failover();
     }
     else {
       self.master = masters.pop();
-      self.emit('connect');
-      self.emit('ready');
+      self.onReady();
     }
   });
 };
 
 RedisHAClient.prototype.makeSlave = function(node, cb) {
+  var self = this;
   if (!this.master) {
-    return error("can't make " + node + " a slave of unknown master!");
+    return self.error("can't make " + node + " a slave of unknown master!");
   }
   if (node.host == this.master.host && node.port == this.master.port) {
-    return warn('refusing to make ' + node + ' a slave of itself!');
+    return self.warn('refusing to make ' + node + ' a slave of itself!');
   }
-  log('making ' + node + ' into a slave...');
+  self.log('making ' + node + ' into a slave...');
   node.client.SLAVEOF(this.master.host, this.master.port, function(err, reply) {
     if (err) {
       return cb(err);
     }
     node.role = 'slave';
-    log(node + ' is slave');
+    self.log(node + ' is slave');
     cb();
   });
 };
 
 RedisHAClient.prototype.failover = function() {
+  var self = this;
   if (this.ready) {
-    return log('ignoring failover while ready');
+    return self.log('ignoring failover while ready');
   }
   this.emit('reconnecting', {});
-  log('attempting failover!');
+  self.log('attempting failover!');
   var tasks = [];
   var id = uuid();
-  log('my failover id: ' + id);
-  var self = this;
+  self.log('my failover id: ' + id);
   // We can't use a regular EXPIRE call because of a bug in redis which prevents
   // slaves from expiring keys correctly.
   var lock_time = 5000;
@@ -499,7 +535,7 @@ RedisHAClient.prototype.failover = function() {
       // Switch to the opcounter db.
       node.client.SELECT(self.options.haredis_db_num, function(err) {
         if (err) {
-          error(err, 'error switching to opcounter db');
+          self.error(err, 'error switching to opcounter db');
           was_error = true;
         }
         cb();
@@ -514,7 +550,7 @@ RedisHAClient.prototype.failover = function() {
         .GET('haredis:failover', function(err, reply) {
           reply = reply.split(':');
           if (reply[0] != id && (Date.now() - reply[1] < lock_time)) {
-            warn('failover already in progress: ' + reply[0]);
+            self.warn('failover already in progress: ' + reply[0]);
             // Don't pass the error, so series() can continue.
             was_error = true;
             return cb();
@@ -525,7 +561,7 @@ RedisHAClient.prototype.failover = function() {
             return;
           }
           if (err) {
-            error(err, 'error locking node');
+            self.error(err, 'error locking node');
             // Don't pass the error, so series() can continue.
             was_error = true;
             return cb();
@@ -534,13 +570,13 @@ RedisHAClient.prototype.failover = function() {
             // set a shortish ttl on the lock. Note that this doesn't actually work...
             node.client.EXPIRE('haredis:failover', 5, function(err) {
               if (err) {
-                error(err, 'error setting ttl on lock');
+                self.error(err, 'error setting ttl on lock');
               }
             });
 
             node.client.GET('haredis:opcounter', function(err, opcounter) {
               if (err) {
-                error(err, 'error getting opcounter');
+                self.error(err, 'error getting opcounter');
                 // Don't pass the error, so parallel() can continue.
                 was_error = true;
               }
@@ -560,7 +596,7 @@ RedisHAClient.prototype.failover = function() {
       // Switch to the normal db.
       node.client.SELECT(self.selected_db, function(err) {
         if (err) {
-          error(err, 'error switching from opcounter db');
+          self.error(err, 'error switching from opcounter db');
           was_error = true;
         }
         cb();
@@ -569,20 +605,20 @@ RedisHAClient.prototype.failover = function() {
   });
   async.series(tasks, function(err, results) {
     if (results.length) {
-      log('unlocking nodes after ' + (err ? 'unsuccessful' : 'successful') + ' lock...');
+      self.log('unlocking nodes after ' + (err ? 'unsuccessful' : 'successful') + ' lock...');
       results.forEach(function(node) {
         if (node && node.client) {
           node.client.DEL('haredis:failover', function(err) {
             if (err) {
-              return error(err, 'error unlocking ' + node);
+              return self.error(err, 'error unlocking ' + node);
             }
-            log('unlocked ' + node);
+            self.log('unlocked ' + node);
           });
         }
       });
     }
     if (err) {
-      warn(err);
+      self.warn(err);
     }
     if (was_error) {
       return self.reorientate();
@@ -598,16 +634,16 @@ RedisHAClient.prototype.failover = function() {
         }
       });
       if (winner) {
-        log(winner + ' had highest opcounter (' + winner.opcounter + ') of ' + self.up.length + ' nodes. congrats!');
+        self.log(winner + ' had highest opcounter (' + winner.opcounter + ') of ' + self.up.length + ' nodes. congrats!');
       }
       else {
-        error('election had no winner!?');
+        self.warn('election had no winner!?');
         return self.reorientate();
       }
 
       winner.client.SLAVEOF('NO', 'ONE', function(err) {
         if (err) {
-          error(err, 'error electing master');
+          self.error(err, 'error electing master');
           return self.reorientate();
         }
         self.master = winner;
@@ -624,19 +660,15 @@ RedisHAClient.prototype.failover = function() {
         if (tasks.length) {
           async.parallel(tasks, function(err) {
             if (err) {
-              return error(err, 'error making slave!');
+              return self.error(err, 'error making slave!');
             }
-            log('publishing gossip:master for ' + self.master.toString());
+            self.log('publishing gossip:master for ' + self.master.toString());
             self.master.client.publish('haredis:gossip:master', self.master.toString());
-            self.orientating = false;
-            self.emit('connect');
-            self.emit('ready');
+            self.onReady();
           });
         }
         else {
-          self.orientating = false;
-          self.emit('connect');
-          self.emit('ready');
+          self.onReady();
         }
       });
     }
@@ -650,7 +682,7 @@ RedisHAClient.prototype.isMaster = function(node) {
 RedisHAClient.prototype.reorientate = function() {
   var self = this;
   this.orientating = false;
-  log('reorientating in ' + default_reorientate_wait + 'ms');
+  self.log('reorientating in ' + default_reorientate_wait + 'ms');
   this.retryInterval = setTimeout(function() {
     self.orientate();
   }, default_reorientate_wait);
