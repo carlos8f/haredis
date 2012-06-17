@@ -60,7 +60,7 @@ function RedisHAClient(nodeList, options) {
     this.options.socket_nodelay = true;
   }
   this.ready = false;
-  this.slaveOk = false;
+  this._slaveOk = false;
   this.on('connect', function() {
     this.host = this.master.host;
     this.port = this.master.port;
@@ -79,8 +79,11 @@ function RedisHAClient(nodeList, options) {
 }
 util.inherits(RedisHAClient, EventEmitter);
 
-RedisHAClient.prototype.slaveOk = RedisHAClient.prototype.slaveOK = function(ok) {
-  this.slaveOk = typeof ok == 'undefined' ? true : false;
+RedisHAClient.prototype.slaveOk = RedisHAClient.prototype.slaveOK = function(command) {
+  if (command) {
+    return this._slaveOk && this.isRead(command);
+  }
+  this._slaveOk = true;
   return this;
 };
 
@@ -151,24 +154,14 @@ commands.forEach(function(k) {
     }
 
     var node;
+    if (this.slaveOk(k)) {
+      node = this.randomSlave();
+    }
 
-    if (self.isRead(k, args)) {
-      if (this.slaveOk) {
-        node = this.randomSlave();
-      }
-      callCommand(node, k, args);
-    }
-    else {
-      callCommand(node, k, args);
-      self.master.incrOpcounter(function(err) {
-        if (err) {
-          // Will trigger failover!
-          return self.master.emit('err', err);
-        }
-      });
-    }
+    callCommand(node, k, args);
 
     function callCommand(client, command, args) {
+      self._slaveOk = false;
       if (!client) {
         client = self.master.client;
       }
@@ -177,7 +170,15 @@ commands.forEach(function(k) {
         client = client.client;
       }
       client[command].apply(client, args);
-      self.slaveOk = false;
+      // Incrememnt opcounter if necessary.
+      if (!self.isRead(command, args)) {
+        self.master.incrOpcounter(function(err) {
+          if (err) {
+            // Will trigger failover!
+            return self.master.emit('err', err);
+          }
+        });
+      }
     }
   };
 });
