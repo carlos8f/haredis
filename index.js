@@ -83,7 +83,7 @@ RedisHAClient.prototype.onReady = function() {
   var self = this;
   this.designateSubSlave(function(err) {
     if (err) {
-      return self.reorientate();
+      return self.reorientate('unable to designate subslave');
     }
     self.ready = true;
     self.orientating = false;
@@ -344,7 +344,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
     node.on('up', function() {
       self.log(this + ' is up');
       if (!self.ready && self.responded.length == nodeList.length) {
-        self.orientate();
+        self.orientate('looking for master');
       }
     });
     node.on('down', function() {
@@ -355,7 +355,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
         self.warn(this + ' is down!');
       }
       if (self.responded.length == nodeList.length) {
-        self.orientate();
+        self.orientate('node down');
       }
       else {
         self.log('only ' + self.responded.length + ' responded with ' + nodeList.length + ' in nodeList');
@@ -404,12 +404,12 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
   });
 };
 
-RedisHAClient.prototype.orientate = function() {
+RedisHAClient.prototype.orientate = function(why) {
   var self = this;
   if (this.orientating) {
     return;
   }
-  self.log('orientating (' + this.up.length + '/' + this.nodes.length + ' nodes up) ...');
+  self.log('orientating (' + why + ', ' + this.up.length + '/' + this.nodes.length + ' nodes up) ...');
   this.orientating = true;
   if (this.retryInterval) {
     clearInterval(this.retryInterval);
@@ -418,7 +418,7 @@ RedisHAClient.prototype.orientate = function() {
   this.ready = false;
   if ((this.up.length / this.down.length) <= 0.5) {
     self.log('refusing to orientate without a majority up!');
-    return this.reorientate();
+    return this.reorientate(why);
   }
   this.up.forEach(function(node) {
     tasks.push(function(cb) {
@@ -456,7 +456,7 @@ RedisHAClient.prototype.orientate = function() {
   async.parallel(tasks, function(err, nodes) {
     if (err) {
       self.warn(err);
-      return self.reorientate();
+      return self.reorientate(why);
     }
     var masters = []
       , slaves = []
@@ -621,7 +621,7 @@ RedisHAClient.prototype.failover = function() {
       self.warn(err);
     }
     if (was_error) {
-      return self.reorientate();
+      return self.reorientate('error during failover');
     }
     else {
       // We've succeeded in locking all the nodes. Now elect our new master...
@@ -637,14 +637,13 @@ RedisHAClient.prototype.failover = function() {
         self.log(winner + ' had highest opcounter (' + winner.opcounter + ') of ' + self.up.length + ' nodes. congrats!');
       }
       else {
-        self.warn('election had no winner!?');
-        return self.reorientate();
+        return self.reorientate('election had no winner!?');
       }
 
       winner.client.SLAVEOF('NO', 'ONE', function(err) {
         if (err) {
           self.error(err, 'error electing master');
-          return self.reorientate();
+          return self.reorientate('error electing master');
         }
         self.master = winner;
         self.master.role = 'master';
@@ -679,12 +678,12 @@ RedisHAClient.prototype.isMaster = function(node) {
   return this.master && this.master.toString() == node.toString();
 };
 
-RedisHAClient.prototype.reorientate = function() {
+RedisHAClient.prototype.reorientate = function(why) {
   var self = this;
   this.orientating = false;
-  self.log('reorientating in ' + default_reorientate_wait + 'ms');
+  self.log('reorientating (' + why + ') in ' + default_reorientate_wait + 'ms');
   this.retryInterval = setTimeout(function() {
-    self.orientate();
+    self.orientate(why);
   }, default_reorientate_wait);
 };
 
