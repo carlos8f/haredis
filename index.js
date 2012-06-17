@@ -134,8 +134,18 @@ commands.forEach(function(k) {
         });
         return;
       case 'quit':
+        log('got quit');
+        var tasks = [];
         this.up.forEach(function(node) {
-          node.quit();
+          tasks.push(function(cb) {
+            node.quit(cb);
+          });
+        });
+        async.parallel(tasks, function(err, replies) {
+          if (typeof args[0] == 'function') {
+            log('done quitting');
+            args[0](err);
+          }
         });
         return;
     }
