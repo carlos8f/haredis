@@ -2,6 +2,7 @@ var redis = require('redis')
   , util = require('util')
   , EventEmitter = require('events').EventEmitter
   , Node = require('./lib/node')
+  , HAMulti = require('./lib/multi')
   , default_port = 6379
   , default_host = '127.0.0.1'
   , default_retry_timeout = 1000
@@ -74,7 +75,7 @@ commands.forEach(function(k) {
     var self = this;
     k = k.toLowerCase();
     if (k == 'multi') {
-      return new redis.Multi(this, args[0]);
+      return new HAMulti(this, args[0]);
     }
     if (!this.ready) {
       // @todo: create a custom multi() method which can return a chainable thing
