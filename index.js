@@ -169,7 +169,7 @@ commands.forEach(function(k) {
       }
       client[command].apply(client, args);
       // Incrememnt opcounter if necessary.
-      if (!self.isRead(command, args)) {
+      if (!self.isRead(command, args) && command != 'publish') {
         self.master.incrOpcounter(function(err) {
           if (err) {
             // Will trigger failover!
@@ -199,7 +199,6 @@ RedisHAClient.prototype.isRead = function(command, args) {
     case 'lrange':
     case 'mget':
     case 'pttl':
-    case 'publish': // considered a read, since message is ephemeral
     case 'scard':
     case 'sinter':
     case 'sismember':
@@ -230,7 +229,7 @@ RedisHAClient.prototype.designateSubSlave = function() {
   if (this.subSlave) {
     if (this.subSlave.status == 'up') {
       if (!this.isMaster(this.subSlave)) {
-        return log('still using ' + this.subSlave + ' as subSlave');
+        log('still using ' + this.subSlave + ' as subSlave');
       }
       else if (this.slaves.length) {
         log('renegotating subSlave away from master');
@@ -331,10 +330,13 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
     node.on('error', function(err) {
       warn(err);
     });
-    node.on('subscribe', function(channel, subscribers) {
+    node.on('subscribe', function(channel, count) {
       if (channel != 'haredis:gossip:master') {
-        self.emit('subscribe', channel, subscribers);
+        self.emit('subscribe', channel, count);
       }
+    });
+    node.on('unsubscribe', function(channel, count) {
+      self.emit('unsubscribe', channel, count);
     });
     node.on('message', function(channel, message) {
       if (channel == 'haredis:gossip:master') {
