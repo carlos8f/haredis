@@ -94,6 +94,7 @@ tests.FLUSHDB = function () {
     client3.select(test_db_num, require_string("OK", name));
     client.mset("flush keys 1", "flush val 1", "flush keys 2", "flush val 2", require_string("OK", name));
     client.FLUSHDB(require_string("OK", name));
+    client.keys('*', redis.print);
     client.dbsize(last(name, require_number(0, name)));
 };
 

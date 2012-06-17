@@ -16,6 +16,7 @@ function createClient(nodes, options) {
 }
 exports.createClient = createClient;
 exports.debug_mode = false;
+exports.print = redis.print;
 
 function log(message, label) {
   if (exports.debug_mode) {
@@ -42,6 +43,8 @@ function RedisHAClient(nodeList, options) {
   this.queue = [];
   this.subscriptions = {};
   this.psubscriptions = {};
+  this.db_num = 0;
+  this.opcounter_db_num = options.opcounter_db_num ? options.opcounter_db_num : 0;
   this.ready = false;
   this.on('connect', function() {
     this.host = this.master.host;
@@ -95,16 +98,17 @@ commands.forEach(function(k) {
             }
           }
         }
-        return this.subSlave.subClient[k].apply(this.subSlave.subClient, args);
+        return callCommand(this.subSlave.subClient, k, args);
       case 'select':
         // Need to execute on all nodes.
         // Execute on master first in case there is a callback.
-        this.master.client[k].apply(this.master.client, args);
+        this.db_num = parseInt(args[0]);
+        callCommand(this.master, k, args);
         // Execute on slaves without a callback.
         this.slaves.forEach(function(node) {
-          node.client[k].apply(node.client, [args[0]]);
+          callCommand(node, k, [args[0]]);
         });
-        break;
+        return;
       case 'bitcount':
       case 'get':
       case 'getbit':
@@ -145,23 +149,53 @@ commands.forEach(function(k) {
         break;
     }
     if (preferSlave) {
-      node = this.randomSlave();
+      callCommand(this.randomSlave(), k, args);
     }
     else {
-      // For write operations, increment an op counter, to judge freshness of slaves.
-      this.master.client.INCR('haredis:opcounter', function(err, reply) {
+      self.incrOpcounter(function(err) {
         if (err) {
-          // Emitting an error on master will cause failover!
-          self.master.emit('error', err);
+          // Will trigger failover!
+          return self.master.client.emit('err', err);
         }
+        callCommand(null, k, args);
       });
     }
-    if (!node) {
-      node = this.master;
+
+    function callCommand(client, command, args) {
+      if (!client) {
+        client = self.master.client;
+      }
+      else if (client.client) {
+        // Passed a node instead of a client
+        client = client.client;
+      }
+      client[command].apply(client, args);
     }
-    return node.client[k].apply(node.client, args);
   };
 });
+
+RedisHAClient.prototype.incrOpcounter = function(done) {
+  var self = this;
+  // For write operations, increment an op counter, to judge freshness of slaves.
+  if (this.db_num != this.opcounter_db_num) {
+    // Temporarily switch to a designated db (opcounter_db_num) to store counter.
+    var tasks = [
+      function(cb) {
+        self.master.client.SELECT(self.opcounter_db_num, cb);
+      },
+      function(cb) {
+        self.master.client.INCR('haredis:opcounter', cb);
+      },
+      function(cb) {
+        self.master.client.SELECT(self.db_num, cb);
+      }
+    ];
+    async.series(tasks, done);
+  }
+  else {
+    self.master.client.INCR('haredis:opcounter', done);
+  }
+};
 
 RedisHAClient.prototype.designateSubSlave = function() {
   var self = this;
