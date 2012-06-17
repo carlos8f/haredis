@@ -47,6 +47,7 @@ function RedisHAClient(nodeList, options) {
   this.db_num = 0;
   this.opcounter_db_num = options.opcounter_db_num ? options.opcounter_db_num : 0;
   this.ready = false;
+  this.slaveOk = false;
   this.on('connect', function() {
     this.host = this.master.host;
     this.port = this.master.port;
@@ -64,6 +65,11 @@ function RedisHAClient(nodeList, options) {
   this.parseNodeList(nodeList, options);
 }
 util.inherits(RedisHAClient, EventEmitter);
+
+RedisHAClient.prototype.slaveOk = RedisHAClient.prototype.slaveOK = function(ok) {
+  this.slaveOk = typeof ok == 'undefined' ? true : false;
+  return this;
+};
 
 commands.forEach(function(k) {
   commands.push(k.toUpperCase());
@@ -83,7 +89,7 @@ commands.forEach(function(k) {
       this.queue.push([k, args]);
       return;
     }
-    var preferSlave = false, node;
+    var isRead = false;
 
     switch (k) {
       case 'subscribe':
@@ -148,14 +154,20 @@ commands.forEach(function(k) {
       case 'zrevrangebyscore':
       case 'zrevrank':
       case 'zscore':
-        preferSlave = true;
+        isRead = true;
         break;
       case 'sort':
         // @todo: parse to see if "store" is used
         break;
     }
-    if (preferSlave) {
-      callCommand(this.randomSlave(), k, args);
+
+    var node;
+
+    if (isRead) {
+      if (this.slaveOk) {
+        node = this.randomSlave();
+      }
+      callCommand(node, k, args);
     }
     else {
       self.incrOpcounter(function(err) {
@@ -163,7 +175,7 @@ commands.forEach(function(k) {
           // Will trigger failover!
           return self.master.client.emit('err', err);
         }
-        callCommand(null, k, args);
+        callCommand(node, k, args);
       });
     }
 
@@ -176,6 +188,7 @@ commands.forEach(function(k) {
         client = client.client;
       }
       client[command].apply(client, args);
+      self.slaveOk = false;
     }
   };
 });
