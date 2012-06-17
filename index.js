@@ -200,6 +200,7 @@ RedisHAClient.prototype.isRead = function(command, args) {
     case 'lrange':
     case 'mget':
     case 'pttl':
+    case 'publish': // considered a read, since message is ephemeral
     case 'scard':
     case 'sinter':
     case 'sismember':
