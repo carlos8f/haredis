@@ -7,7 +7,8 @@ var redis = require('redis')
   , default_port = 6379
   , default_host = '127.0.0.1'
   , default_retry_timeout = 1000
-  , default_reorientate_wait = 10000
+  , default_lock_time = 1000
+  , default_reorientate_wait = 2000
   , commands = require('./node_modules/redis/lib/commands')
   , async = require('async')
   , uuid = require('./lib/uuid')
@@ -83,6 +84,7 @@ RedisHAClient.prototype.onReady = function() {
   var self = this;
   this.designateSubSlave(function(err) {
     if (err) {
+      self.ready = false;
       return self.reorientate('unable to designate subslave');
     }
     self.ready = true;
@@ -343,8 +345,13 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
     var node = new Node(spec, options);
     node.on('up', function() {
       self.log(this + ' is up');
-      if (!self.ready && self.responded.length == nodeList.length) {
-        self.orientate('looking for master');
+      if (self.responded.length == nodeList.length) {
+        if (self.ready) {
+          self.reorientate('evaluating ' + this);
+        }
+        else {
+          self.orientate('looking for master');
+        }
       }
     });
     node.on('down', function() {
@@ -354,12 +361,9 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
       else {
         self.warn(this + ' is down!');
       }
-      if (self.responded.length == nodeList.length) {
-        self.orientate('node down');
-      }
-      else {
-        self.log('only ' + self.responded.length + ' responded with ' + nodeList.length + ' in nodeList');
-      }
+      self.emit('reconnecting', {});
+      self.ready = false;
+      self.reorientate('node down');
     });
     node.on('error', function(err) {
       self.warn(err);
@@ -406,7 +410,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
 
 RedisHAClient.prototype.orientate = function(why) {
   var self = this;
-  if (this.orientating) {
+  if (this.ready || this.orientating) {
     return;
   }
   self.log('orientating (' + why + ', ' + this.up.length + '/' + this.nodes.length + ' nodes up) ...');
@@ -517,14 +521,12 @@ RedisHAClient.prototype.failover = function() {
   if (this.ready) {
     return self.log('ignoring failover while ready');
   }
-  this.emit('reconnecting', {});
   self.log('attempting failover!');
   var tasks = [];
   var id = uuid();
   self.log('my failover id: ' + id);
   // We can't use a regular EXPIRE call because of a bug in redis which prevents
   // slaves from expiring keys correctly.
-  var lock_time = 5000;
   var was_error = false;
   this.up.forEach(function(node) {
     tasks.push(function(cb) {
@@ -549,7 +551,7 @@ RedisHAClient.prototype.failover = function() {
         .SETNX('haredis:failover', id + ':' + Date.now())
         .GET('haredis:failover', function(err, reply) {
           reply = reply.split(':');
-          if (reply[0] != id && (Date.now() - reply[1] < lock_time)) {
+          if (reply[0] != id && (Date.now() - reply[1] < default_lock_time)) {
             self.warn('failover already in progress: ' + reply[0]);
             // Don't pass the error, so series() can continue.
             was_error = true;
@@ -612,7 +614,7 @@ RedisHAClient.prototype.failover = function() {
         self.log('unlocking due to partial lock...');
         results.forEach(function(node) {
           if (node && node.client) {
-            node.select(self.options.haredis_db_num, function(err) {
+            node.client.SELECT(self.options.haredis_db_num, function(err) {
               if (err) {
                 return self.warn(err, 'error selecting db to unlock ' + node);
               }
@@ -620,7 +622,7 @@ RedisHAClient.prototype.failover = function() {
                 if (err) {
                   return self.warn(err, 'error unlocking ' + node);
                 }
-                node.select(self.selected_db, function(err) {
+                node.client.SELECT(self.selected_db, function(err) {
                   if (err) {
                     return self.warn(err, 'error unlocking ' + node);
                   }
@@ -695,7 +697,6 @@ RedisHAClient.prototype.isMaster = function(node) {
 
 RedisHAClient.prototype.reorientate = function(why) {
   var self = this;
-  this.orientating = false;
   self.log('reorientating (' + why + ') in ' + default_reorientate_wait + 'ms');
   this.retryInterval = setTimeout(function() {
     self.orientate(why);
