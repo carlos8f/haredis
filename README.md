@@ -100,6 +100,25 @@ Redis connection gone from end event.
 [19:28:00](#1) info: set on 127.0.0.1:6381 (master default)
 ```
 
+Running tests
+=============
+
+**haredis** includes the test suite from [node_redis](https://github.com/mranney/node_redis)
+which can be run in single or clustered mode.
+
+If you have redis daemons running locally on ports 6380, 6381 and 8382, you can
+run the clustered test with:
+
+```bash
+$ make test-clustered
+```
+
+Or in single-mode with a redis server on port 6379:
+
+```bash
+$ make test
+```
+
 LICENSE - "MIT License"
 =======================
 

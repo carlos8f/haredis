@@ -1,4 +1,6 @@
 var nodes = [6380, 6381, 6382];
+console.log('Note: test requires redis daemons running locally on ports 6380, 6381, and 6382!');
+
 /*global require console setTimeout process Buffer */
 var redis = require("./index"),
     client = redis.createClient(nodes),
