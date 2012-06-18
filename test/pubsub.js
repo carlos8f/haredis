@@ -23,7 +23,6 @@ subClient.on('message', function(channel, message) {
 setInterval(function() {
   var id = uuid();
   client.publish('mychannel', id, function(err, reply) {
-    console.log(reply);
     if (err) {
       err_per_sec++;
       return console.error(err);
