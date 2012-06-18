@@ -250,7 +250,7 @@ RedisHAClient.prototype.designateSubSlave = function(callback) {
       if (!this.isMaster(this.subSlave)) {
         self.log('still using ' + this.subSlave + ' as subSlave');
       }
-      else if (this.slaves.length) {
+      else if (this.slaves.length > 0) {
         self.log('renegotating subSlave away from master');
         var oldSubSlave = this.subSlave;
         Object.keys(self.subscriptions).forEach(function(channel) {
@@ -605,17 +605,32 @@ RedisHAClient.prototype.failover = function() {
   });
   async.series(tasks, function(err, results) {
     if (results.length) {
-      self.log('unlocking nodes after ' + (err ? 'unsuccessful' : 'successful') + ' lock...');
-      results.forEach(function(node) {
-        if (node && node.client) {
-          node.client.DEL('haredis:failover', function(err) {
-            if (err) {
-              return self.error(err, 'error unlocking ' + node);
-            }
-            self.log('unlocked ' + node);
-          });
-        }
-      });
+      if (!was_error) {
+        self.log('lock was a success!');
+      }
+      else {
+        self.log('unlocking due to partial lock...');
+        results.forEach(function(node) {
+          if (node && node.client) {
+            node.select(self.options.haredis_db_num, function(err) {
+              if (err) {
+                return self.warn(err, 'error selecting db to unlock ' + node);
+              }
+              node.client.DEL('haredis:failover', function(err) {
+                if (err) {
+                  return self.warn(err, 'error unlocking ' + node);
+                }
+                node.select(self.selected_db, function(err) {
+                  if (err) {
+                    return self.warn(err, 'error unlocking ' + node);
+                  }
+                  self.log('unlocked ' + node);
+                });
+              });
+            });
+          }
+        });
+      }
     }
     if (err) {
       self.warn(err);
@@ -724,5 +739,5 @@ RedisHAClient.prototype.nodeFromKey = function(key) {
 };
 
 RedisHAClient.prototype.randomSlave = function() {
-  return this.slaves[Math.round(Math.random() * this.slaves.length - 1)];
+  return this.slaves[Math.round(Math.random() * (this.slaves.length - 1))];
 };
