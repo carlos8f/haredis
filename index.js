@@ -14,23 +14,32 @@ var redis = require('redis')
   , uuid = require('./lib/uuid')
   ;
 
-function createClient(nodes, options) {
-  return new RedisHAClient(nodes, options);
+function createClient(nodes, options, etc) {
+  return new RedisHAClient(nodes, options, etc);
 }
 exports.createClient = createClient;
 exports.debug_mode = false;
 exports.print = redis.print;
 
 function RedisHAClient(nodeList, options) {
-  if (!util.isArray(nodeList) || (typeof options != 'undefined' && typeof options != 'object')) {
-    throw new Error('error (haredis) invalid createClient() arguments. Must call createClient(array, [object])');
-  }
   var self = this;
+  this.connection_id = ++connection_id;
+  if (typeof arguments[0] == 'undefined' && typeof arguments[1] == 'undefined') {
+    self.log('no arguments passed, starting client in local single server mode');
+    nodeList = [default_port];
+  }
+  else if (!util.isArray(nodeList)) {
+    var port = nodeList ? nodeList : default_port;
+    var host = options ? options : default_host;
+    nodeList = [host + ':' + port];
+    options = typeof arguments[2] != 'undefined' ? arguments[2] : {};
+    self.log('a port/host combo was passed, starting client in single server mode');
+  }
   EventEmitter.call(this);
   options = options || {};
   this.retryTimeout = options.retryTimeout || default_retry_timeout;
   this.orientating = false;
-  this.connection_id = ++connection_id;
+
   this.nodes = [];
   this.queue = [];
   this.subscriptions = {};
@@ -49,8 +58,10 @@ function RedisHAClient(nodeList, options) {
   this.ready = false;
   this._slaveOk = false;
   this.on('connect', function() {
+    // Mirror some stuff from master client, to better simulate node_redis.
     this.host = this.master.host;
     this.port = this.master.port;
+    this.stream = this.master.client.stream;
     this.reply_parser = this.master.client.reply_parser;
     this.send_command = this.master.client.send_command.bind(this.master.client);
   });
@@ -191,7 +202,7 @@ commands.forEach(function(k) {
       }
       client[command].apply(client, args);
       // Increment opcounter if necessary.
-      if (!self.isRead(command, args) && command != 'publish') {
+      if (!self.isRead(command, args) && command != 'publish' && command != 'monitor') {
         self.master.incrOpcounter(function(err) {
           if (err) {
             // Will trigger failover!
