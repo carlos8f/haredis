@@ -1,7 +1,7 @@
 haredis
 -------
 
-High-availability in Node.js
+High-availability redis in Node.js
 
 Idea
 ====
