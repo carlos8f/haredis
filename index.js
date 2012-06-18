@@ -155,7 +155,7 @@ commands.forEach(function(k) {
         // different slaves.
         var type = k[0] == 'p' ? 'psubscriptions' : 'subscriptions';
         var unsub = k.indexOf('unsub') !== -1;
-        for (i in args) {
+        for (var i in args) {
           if (typeof args[i] == 'string') {
             if (unsub) {
               delete this[type][args[i]];
