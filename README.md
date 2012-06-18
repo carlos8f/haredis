@@ -18,7 +18,11 @@ var redis = require('haredis')
 ```
 
 ...and you can use `client` as you would normally. **haredis** will automatically
-determine which node should be master, and keep standby connections to the others.
+determine which node to promote to master, and keep standby connections to
+the others.
+
+If multiple **haredis** clients are connected, a locking mechanism is implemented
+to prevent contention between failover attempts.
 
 To see this in action,
 
@@ -52,6 +56,26 @@ Redis connection gone from end event.
 [19:28:00](#1) info: set on 127.0.0.1:6381 (master default)
 ```
 
+Difference: createClient
+========================
+
+In **haredis**, `createClient` works like this:
+
+```javascript
+function createClient([host/port array], options)
+```
+
+The first argument can be an array of hosts (using default port), an array of
+ports (using localhost), or a colon-separated string (i.e., `1.2.3.4:6379`).
+**haredis** will attempt to connect to all of these servers.
+
+`options` corresponds to the same options you would pass
+[node_redis](https://github.com/mranney/node_redis). **haredis**
+additionally supports:
+
+- `haredis_db_num` {Number} database number that **haredis** should store metadata
+  in (such as an opcounter). Defaults to `15`.
+
 One-client pub/sub
 ==================
 
@@ -64,6 +88,12 @@ commands. This is because it keeps internal redis clients in pub/sub mode for
 internal "gossip", but also makes it available for users. Of course this is
 optional, and you can always maintain a separate `haredis` client for subscribes
 if you wish.
+
+Advice
+======
+
+For proper failover, a majority of the nodes need to be still online. This means
+that the minimum number of nodes should be 
 
 LICENSE - "MIT License"
 =======================
