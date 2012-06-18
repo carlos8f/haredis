@@ -568,9 +568,7 @@ tests.SUBSCRIBE = function () {
     });
 
     client1.on("unsubscribe", function (channel, count) {
-        // Changed from 0 to 1, because in haredis there is always a subscription
-        // to haredis:gossip:master
-        if (count === 1) {
+        if (count === 0) {
             // make sure this connection can go into and out of pub/sub mode
             client1.incr("did a thing", last(name, require_number(2, name)));
         }
