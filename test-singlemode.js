@@ -1,9 +1,8 @@
-var nodes = [6380, 6381, 6382];
 /*global require console setTimeout process Buffer */
 var redis = require("./index"),
-    client = redis.createClient(nodes),
-    client2 = redis.createClient(nodes),
-    client3 = redis.createClient(nodes),
+    client = redis.createClient(),
+    client2 = redis.createClient(),
+    client3 = redis.createClient(),
     assert = require("assert"),
     util = require("util"),
     test_db_num = 15, // this DB will be flushed and used for testing
@@ -340,10 +339,9 @@ tests.WATCH_MULTI = function () {
 };
 
 tests.detect_buffers = function () {
-    var name = "detect_buffers", detect_client = redis.createClient(nodes, {detect_buffers: true});
+    var name = "detect_buffers", detect_client = redis.createClient(null, null, {detect_buffers: true});
 
     detect_client.on("ready", function () {
-        detect_client.select(test_db_num, require_string("OK", name));
         // single Buffer or String
         detect_client.set("string key 1", "string value");
         detect_client.get("string key 1", require_string("string value", name));
@@ -399,9 +397,9 @@ tests.detect_buffers = function () {
 tests.socket_nodelay = function () {
     var name = "socket_nodelay", c1, c2, c3, ready_count = 0, quit_count = 0;
 
-    c1 = redis.createClient(nodes, {socket_nodelay: true});
-    c2 = redis.createClient(nodes, {socket_nodelay: false});
-    c3 = redis.createClient(nodes);
+    c1 = redis.createClient(null, null, {socket_nodelay: true});
+    c2 = redis.createClient(null, null, {socket_nodelay: false});
+    c3 = redis.createClient(null, null);
 
     function quit_check() {
         quit_count++;
@@ -416,19 +414,16 @@ tests.socket_nodelay = function () {
         assert.strictEqual(false, c2.options.socket_nodelay, name);
         assert.strictEqual(true, c3.options.socket_nodelay, name);
 
-        c1.select(test_db_num, require_string("OK", name));
         c1.set(["set key 1", "set val"], require_string("OK", name));
         c1.set(["set key 2", "set val"], require_string("OK", name));
         c1.get(["set key 1"], require_string("set val", name));
         c1.get(["set key 2"], require_string("set val", name));
 
-        c2.select(test_db_num, require_string("OK", name));
         c2.set(["set key 3", "set val"], require_string("OK", name));
         c2.set(["set key 4", "set val"], require_string("OK", name));
         c2.get(["set key 3"], require_string("set val", name));
         c2.get(["set key 4"], require_string("set val", name));
 
-        c3.select(test_db_num, require_string("OK", name));
         c3.set(["set key 5", "set val"], require_string("OK", name));
         c3.set(["set key 6", "set val"], require_string("OK", name));
         c3.get(["set key 5"], require_string("set val", name));
@@ -458,7 +453,7 @@ tests.reconnect = function () {
     client.set("recon 2", "two", function (err, res) {
         // Do not do this in normal programs. This is to simulate the server closing on us.
         // For orderly shutdown in normal programs, do client.quit()
-        client.master.client.stream.destroy();
+        client.stream.destroy();
     });
 
     client.on("reconnecting", function on_recon(params) {
@@ -559,11 +554,9 @@ tests.SUBSCRIBE = function () {
 
     client1.on("subscribe", function (channel, count) {
         if (channel === "chan1") {
-            // Callback assertions removed.
-            // For some reason subscriber count is inconsistent here?
-            client2.publish("chan1", "message 1");
-            client2.publish("chan2", "message 2");
-            client2.publish("chan1", "message 3");
+            client2.publish("chan1", "message 1", require_number(1, name));
+            client2.publish("chan2", "message 2", require_number(1, name));
+            client2.publish("chan1", "message 3", require_number(1, name));
         }
     });
 
@@ -1246,7 +1239,7 @@ tests.MONITOR = function () {
     var name = "MONITOR", responses = [], monitor_client;
 
     if (client.server_info.versions[0] == 2 && client.server_info.versions[1] <= 4) {
-        monitor_client = redis.createClient(nodes);
+        monitor_client = redis.createClient();
         monitor_client.monitor(function (err, res) {
             client.mget("some", "keys", "foo", "bar");
             client.set("json", JSON.stringify({

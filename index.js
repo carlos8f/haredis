@@ -26,6 +26,7 @@ function RedisHAClient(nodeList, options) {
   this.connection_id = ++connection_id;
   if (typeof arguments[0] == 'undefined' && typeof arguments[1] == 'undefined') {
     self.log('no arguments passed, starting client in local single server mode');
+    options = {single_mode: true};
     nodeList = [default_port];
   }
   else if (!util.isArray(nodeList)) {
@@ -33,10 +34,13 @@ function RedisHAClient(nodeList, options) {
     var host = options ? options : default_host;
     nodeList = [host + ':' + port];
     options = typeof arguments[2] != 'undefined' ? arguments[2] : {};
+    options.single_mode = true;
     self.log('a port/host combo was passed, starting client in single server mode');
   }
+  else {
+    options = options || {};
+  }
   EventEmitter.call(this);
-  options = options || {};
   this.retryTimeout = options.retryTimeout || default_retry_timeout;
   this.orientating = false;
 
@@ -55,6 +59,7 @@ function RedisHAClient(nodeList, options) {
   if (typeof this.options.socket_nodelay == 'undefined') {
     this.options.socket_nodelay = true;
   }
+  this.connected = false;
   this.ready = false;
   this._slaveOk = false;
   this.on('connect', function() {
@@ -64,6 +69,12 @@ function RedisHAClient(nodeList, options) {
     this.stream = this.master.client.stream;
     this.reply_parser = this.master.client.reply_parser;
     this.send_command = this.master.client.send_command.bind(this.master.client);
+    this.connected = true;
+    if (this.auth_callback) {
+      // Note: response is simulated :) Auth would've happened by now on
+      // all nodes.
+      this.auth_callback(null, 'OK');
+    }
   });
   this.parseNodeList(nodeList, this.options);
 }
@@ -213,6 +224,16 @@ commands.forEach(function(k) {
     }
   };
 });
+
+// Stash auth for connect and reconnect.  Send immediately if already connected.
+RedisHAClient.prototype.auth = RedisHAClient.prototype.AUTH = function () {
+  var args = Array.prototype.slice.call(arguments);
+  var self = this;
+  this.auth_callback = args[1];
+  this.nodes.forEach(function(node) {
+    node.auth_pass = args[0];
+  });
+};
 
 RedisHAClient.prototype.isRead = function(command, args) {
   switch (command.toLowerCase()) {
@@ -373,8 +394,10 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
       else {
         self.warn(this + ' is down!');
       }
-      self.emit('reconnecting', {});
+      self.connected = false;
       self.ready = false;
+      // @todo: pass some real attempts/timers here
+      self.emit('reconnecting', {});
       self.reorientate('node down');
     });
     node.on('error', function(err) {
