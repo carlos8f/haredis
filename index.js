@@ -405,6 +405,9 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
         self.emit('message', channel, message);
       }
     });
+    node.on('monitor', function(time, args) {
+      self.emit('monitor', time, args);
+    });
     self.nodes.push(node);
   });
 };
