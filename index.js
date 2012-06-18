@@ -164,8 +164,9 @@ commands.forEach(function(k) {
           });
         });
         async.parallel(tasks, function(err, replies) {
+          self.emit('end');
+          self.log('done quitting');
           if (typeof args[0] == 'function') {
-            self.log('done quitting');
             args[0](err);
           }
         });
