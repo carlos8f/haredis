@@ -17,9 +17,9 @@ var redis = require('haredis')
   ;
 ```
 
-...and you can use `client` as you would normally. **haredis** will automatically
-determine which node to promote to master, and keep standby connections to
-the others.
+...then use `client` as you would use [node_redis](https://github.com/mranney/node_redis).
+If the master node goes down, **haredis** will automatically determine which node
+to promote to master, and keep standby connections to the others.
 
 If multiple **haredis** clients are connected, a locking mechanism is implemented
 to prevent contention between failover attempts.
@@ -33,29 +33,6 @@ To see this in action,
   the node it detects is freshest, set that to master, and the others to slaves!
 - Bring up 6380, and it will be added as standby for failover.
 
-To see what's under the hood, try setting `redis.debug_mode = true`, and you can
-see the failover process in detail:
-
-```
-[19:27:58](#1) info: set on 127.0.0.1:6380 (master default)
-[19:27:58](#1) warning: MASTER is down! (127.0.0.1:6380)
-[19:27:58](#1) info: reorientating (node down) in 2000ms
-Redis connection gone from end event.
-[19:28:00](#1) info: orientating (node down, 2/3 nodes up) ...
-[19:28:00](#1) warning: invalid master count: 0
-[19:28:00](#1) info: attempting failover!
-[19:28:00](#1) info: my failover id: gP0SCM1B
-[19:28:00](#1) info: lock was a success!
-[19:28:00](#1) info: 127.0.0.1:6381 had highest opcounter (1441) of 2 nodes. congrats!
-[19:28:00](#1) info: making 127.0.0.1:6382 into a slave...
-[19:28:00](#1) info: 127.0.0.1:6382 is slave
-[19:28:00](#1) info: publishing gossip:master for 127.0.0.1:6381
-[19:28:00](#1) info: renegotating subSlave away from master
-[19:28:00](#1) info: subSlave is now 127.0.0.1:6382
-[19:28:00](#1) info: ready, using 127.0.0.1:6381 as master
-[19:28:00](#1) info: set on 127.0.0.1:6381 (master default)
-```
-
 Difference: createClient
 ========================
 
@@ -65,9 +42,9 @@ In **haredis**, `createClient` works like this:
 function createClient([host/port array], options)
 ```
 
-The first argument can be an array of hosts (using default port), an array of
-ports (using localhost), or a colon-separated string (i.e., `1.2.3.4:6379`).
-**haredis** will attempt to connect to all of these servers.
+The first argument can be an array of hosts (using default port), ports (using
+localhost), or colon-separated strings (i.e., `1.2.3.4:6379`). **haredis** will
+attempt to connect to all of these servers.
 
 `options` corresponds to the same options you would pass
 [node_redis](https://github.com/mranney/node_redis). **haredis**
@@ -93,7 +70,35 @@ Advice
 ======
 
 For proper failover, a majority of the nodes need to be still online. This means
-that the minimum number of nodes should be 
+that the minimum number of nodes should be 3. Under the minimum setup, you can
+lose up to 1 node. If only 1/3 are up, commands will be queued indefinitely until
+another node comes up.
+
+Debugging/verbose logging
+=========================
+
+To see what's under the hood, try setting `redis.debug_mode = true`, and you can
+see the failover process in detail:
+
+```
+[19:27:58](#1) info: set on 127.0.0.1:6380 (master default)
+[19:27:58](#1) warning: MASTER is down! (127.0.0.1:6380)
+[19:27:58](#1) info: reorientating (node down) in 2000ms
+Redis connection gone from end event.
+[19:28:00](#1) info: orientating (node down, 2/3 nodes up) ...
+[19:28:00](#1) warning: invalid master count: 0
+[19:28:00](#1) info: attempting failover!
+[19:28:00](#1) info: my failover id: gP0SCM1B
+[19:28:00](#1) info: lock was a success!
+[19:28:00](#1) info: 127.0.0.1:6381 had highest opcounter (1441) of 2 nodes. congrats!
+[19:28:00](#1) info: making 127.0.0.1:6382 into a slave...
+[19:28:00](#1) info: 127.0.0.1:6382 is slave
+[19:28:00](#1) info: publishing gossip:master for 127.0.0.1:6381
+[19:28:00](#1) info: renegotating subSlave away from master
+[19:28:00](#1) info: subSlave is now 127.0.0.1:6382
+[19:28:00](#1) info: ready, using 127.0.0.1:6381 as master
+[19:28:00](#1) info: set on 127.0.0.1:6381 (master default)
+```
 
 LICENSE - "MIT License"
 =======================
