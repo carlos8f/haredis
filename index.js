@@ -9,7 +9,7 @@ var redis = require('redis')
   , default_retry_timeout = 1000
   , default_lock_time = 1000
   , default_reorientate_wait = 2000
-  , commands = require('./node_modules/redis/lib/commands')
+  , commands = require('redis/lib/commands')
   , async = require('async')
   , uuid = require('./lib/uuid')
   ;
