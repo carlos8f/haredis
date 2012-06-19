@@ -196,7 +196,7 @@ commands.forEach(function(k) {
     }
 
     var client, node;
-    if (this.slaveOk(k)) {
+    if (this.options.auto_slaveok || this.slaveOk(k)) {
       if (node = this.randomSlave()) {
         self.log(k + ' on ' + node);
         client = node.client;
