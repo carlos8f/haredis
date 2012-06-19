@@ -19,6 +19,7 @@ function createClient(nodes, options, etc) {
 }
 exports.createClient = createClient;
 exports.debug_mode = false;
+exports.command_logging = false;
 exports.print = redis.print;
 
 function RedisHAClient(nodeList, options) {
@@ -165,7 +166,9 @@ commands.forEach(function(k) {
             }
           }
         }
-        self.log(k + ' on ' + this.subSlave);
+        if (exports.command_logging) {
+          self.log(k + ' on ' + this.subSlave);
+        }
         return callCommand(this.subSlave.subClient, k, args);
       case 'select':
         // Need to execute on all nodes.
@@ -198,7 +201,9 @@ commands.forEach(function(k) {
     var client, node;
     if (this.options.auto_slaveok || this.slaveOk(k)) {
       if (node = this.randomSlave()) {
-        self.log(k + ' on ' + node);
+        if (exports.command_logging) {
+          self.log(k + ' on ' + node);
+        }
         client = node.client;
       }
     }
@@ -208,7 +213,9 @@ commands.forEach(function(k) {
     function callCommand(client, command, args) {
       self._slaveOk = false;
       if (!client) {
-        self.log(command + ' on ' + self.master + ' (master default)');
+        if (exports.command_logging) {
+          self.log(command + ' on ' + self.master + ' (master default)');
+        }
         client = self.master.client;
       }
       client[command].apply(client, args);

@@ -2,6 +2,7 @@ var redis = require('../')
   , uuid = require('../lib/uuid')
   ;
 
+redis.debug_mode = true;
 var client = redis.createClient([6380, 6381, 6382]);
 
 var cmd_per_sec = 0;

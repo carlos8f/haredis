@@ -2,6 +2,7 @@ var redis = require('../')
   , uuid = require('../lib/uuid')
   ;
 
+redis.debug_mode = true;
 var nodes = [6380, 6381, 6382];
 var client = redis.createClient(nodes);
 var subClient = redis.createClient(nodes);

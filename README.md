@@ -115,7 +115,6 @@ To see what's under the hood, try setting `redis.debug_mode = true`, and you can
 see the failover process in detail:
 
 ```
-[19:27:58](#1) info: set on 127.0.0.1:6380 (master default)
 [19:27:58](#1) warning: MASTER is down! (127.0.0.1:6380)
 [19:27:58](#1) info: reorientating (node down) in 2000ms
 Redis connection gone from end event.
@@ -131,8 +130,10 @@ Redis connection gone from end event.
 [19:28:00](#1) info: renegotating subSlave away from master
 [19:28:00](#1) info: subSlave is now 127.0.0.1:6382
 [19:28:00](#1) info: ready, using 127.0.0.1:6381 as master
-[19:28:00](#1) info: set on 127.0.0.1:6381 (master default)
 ```
+
+To get info on which commands are executed on which servers, try setting
+`redis.command_logging = true`.
 
 Running tests
 =============
