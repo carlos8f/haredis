@@ -7,8 +7,26 @@ Idea
 ====
 
 **haredis** is a code wrapper around [node_redis](https://github.com/mranney/node_redis)
-which adds fault-taulerance to your application. Start up multiple redis daemons,
-with no special configuration necessary, and list them like so:
+which adds fault-taulerance to your application.
+
+Features:
+
+- Drop-in replacement for [node_redis](https://github.com/mranney/node_redis)
+- Easily build a cluster out of 3 or more (default-configured) redis servers
+- Auto-failover due to connection drops
+- Master conflict resolution (default your servers to master, and **haredis**
+  will elect the freshest and issue the `SLAVEOF` commands)
+- Freshness judged by an opcounter (incremented on write)
+- Locking mechanism to prevent failover contention
+- Load-balancing for reads and pub/sub
+- One-client pub/sub
+- Gossip channel for quick failover
+
+Usage
+=====
+
+Start up multiple redis daemons, with no special configuration necessary, and
+list them like so:
 
 ```javascript
 var redis = require('haredis')
@@ -33,8 +51,8 @@ To see this in action,
   the node it detects is freshest, set that to master, and the others to slaves!
 - Bring up 6380, and it will be added as standby for failover.
 
-Difference: createClient
-========================
+API difference: createClient
+============================
 
 In **haredis**, `createClient` works like this:
 
@@ -52,6 +70,22 @@ additionally supports:
 
 - `haredis_db_num` {Number} database number that **haredis** should store metadata
   in (such as an opcounter). Defaults to `15`.
+
+Load-balancing
+==============
+
+**haredis** can also load-balance read operations to random slaves. Pub/sub
+subscriptions will automatically try to use a slave. For normal read-only
+commands, you can choose to query a random slave by using the `slaveOk()` method:
+
+```javascript
+client.slaveOk().GET('foo', function(err, reply) { ...
+```
+
+`slaveOk()` will only affect the current command.
+
+To load-balance all reads, you can set `options.auto_slaveok = true` in
+`createClient()`. Be advised that this can case problems due to replication delay!
 
 One-client pub/sub
 ==================
