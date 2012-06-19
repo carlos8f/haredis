@@ -145,7 +145,7 @@ If you have redis daemons running locally on ports 6380, 6381 and 8382, you can
 run the clustered test with:
 
 ```bash
-$ make test-clustered
+$ make test-cluster
 ```
 
 Or in single-mode with a redis server on port 6379:
