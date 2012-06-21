@@ -20,6 +20,7 @@ function createClient(nodes, options, etc) {
   return new RedisHAClient(nodes, options, etc);
 }
 exports.createClient = createClient;
+exports.RedisClient = RedisHAClient;
 exports.debug_mode = false;
 exports.command_logging = false;
 exports.print = redis.print;

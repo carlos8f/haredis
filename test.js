@@ -1390,8 +1390,6 @@ run_next_test = function run_next_test() {
     }
 };
 
-assert(client instanceof require('redis').RedisClient, 'RedisHAClient instanceof RedisClient');
-
 client.once("ready", function start_tests() {
     console.log("Connected to " + client.host + ":" + client.port + ", Redis server version " + client.server_info.redis_version + "\n");
     console.log("Using reply parser " + client.reply_parser.name);
