@@ -14,6 +14,8 @@ var redis = require('redis')
   , uuid = require('./lib/uuid')
   ;
 
+require('pkginfo')(module);
+
 function createClient(nodes, options, etc) {
   return new RedisHAClient(nodes, options, etc);
 }
@@ -44,6 +46,7 @@ function RedisHAClient(nodeList, options) {
   EventEmitter.call(this);
   this.retryTimeout = options.retryTimeout || default_retry_timeout;
   this.orientating = false;
+  this.haredis_version = exports.version;
 
   this.nodes = [];
   this.queue = [];
@@ -79,7 +82,7 @@ function RedisHAClient(nodeList, options) {
   });
   this.parseNodeList(nodeList, this.options);
 }
-util.inherits(RedisHAClient, EventEmitter);
+util.inherits(RedisHAClient, redis.RedisClient);
 
 RedisHAClient.prototype.log = function(message, label) {
   if (exports.debug_mode) {
