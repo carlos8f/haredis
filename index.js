@@ -83,7 +83,7 @@ function RedisHAClient(nodeList, options) {
   });
   this.parseNodeList(nodeList, this.options);
 }
-util.inherits(RedisHAClient, redis.RedisClient);
+util.inherits(RedisHAClient, EventEmitter);
 
 RedisHAClient.prototype.log = function(message, label) {
   if (exports.debug_mode) {
