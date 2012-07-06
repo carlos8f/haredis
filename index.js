@@ -746,6 +746,7 @@ RedisHAClient.prototype.isMaster = function(node) {
 
 RedisHAClient.prototype.reorientate = function(why) {
   var self = this;
+  this.orientating = false;
   self.log('reorientating (' + why + ') in ' + default_reorientate_wait + 'ms');
   this.retryInterval = setTimeout(function() {
     self.orientate(why);
