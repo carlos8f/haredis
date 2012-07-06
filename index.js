@@ -138,13 +138,28 @@ RedisHAClient.prototype.onReady = function() {
     }
     self.ready = true;
     self.orientating = false;
+    function onDrain() {
+      self.emit('drain');
+    }
+    function onIdle() {
+      if (self.queue.length === 0) {
+        self.emit('idle');
+      }
+    }
     if (!self.server_info) {
       self.debug('ready, using ' + self.master + ' as master');
     }
     else {
       self.warn('orientate complete, using ' + self.master + ' as master');
+      self.slaves.forEach(function(node) {
+        node.client.removeListener('drain', onDrain);
+        node.client.removeListener('idle', onIdle);
+      });
     }
+    self.master.client.on('drain', onDrain);
+    self.master.client.on('idle', onIdle);
     self.server_info = self.master.info;
+
     self.emit('connect');
     self.emit('ready');
     self.drainQueue();
