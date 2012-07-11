@@ -434,6 +434,18 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
         }
       }
     });
+    node.on('reconnecting', function() {
+      if (self.isMaster(this)) {
+        self.warn('MASTER connection dropped, reconnecting...');
+      }
+      else {
+        self.warn(this + ' connection dropped, reconnecting...');
+      }
+      self.connected = false;
+      self.ready = false;
+      // @todo: pass some real attempts/timers here
+      self.emit('reconnecting', {});
+    });
     node.on('down', function() {
       if (self.isMaster(this)) {
         self.error('MASTER is down! (' + this + ')');
