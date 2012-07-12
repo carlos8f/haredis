@@ -146,15 +146,15 @@ RedisHAClient.prototype.onReady = function() {
         self.emit('idle');
       }
     }
+    self.nodes.forEach(function(node) {
+      node.client.removeListener('drain', onDrain);
+      node.client.removeListener('idle', onIdle);
+    });
     if (!self.server_info) {
       self.debug('ready, using ' + self.master + ' as master');
     }
     else {
       self.warn('orientate complete, using ' + self.master + ' as master');
-      self.slaves.forEach(function(node) {
-        node.client.removeListener('drain', onDrain);
-        node.client.removeListener('idle', onIdle);
-      });
     }
     self.master.client.on('drain', onDrain);
     self.master.client.on('idle', onIdle);
