@@ -24,7 +24,8 @@ var defaults = {
   reorientate_wait: 2000,
   haredis_db_num: 15,
   socket_nodelay: true,
-  log_level: log_level.error | log_level.warning | log_level.info
+  log_level: log_level.error | log_level.warning | log_level.info,
+  opcounterDiviser: 100
 };
 
 function createClient(nodes, options, etc) {
@@ -69,6 +70,7 @@ function RedisHAClient(nodeList, options) {
   this.connected = false;
   this.ready = false;
   this._slaveOk = false;
+  this.opcounter = 0;
   this.on('connect', function() {
     // Mirror some stuff from master client, to better simulate node_redis.
     this.host = this.master.host;
