@@ -263,7 +263,7 @@ commands.forEach(function(k) {
       client[command].apply(client, args);
       // Increment opcounter if necessary.
       if (!self.isRead(command, args) && command != 'publish' && command != 'monitor') {
-        self.master.incrOpcounter(function(err) {
+        self.incrOpcounter(function(err) {
           if (err) {
             // Will trigger failover!
             return self.master.emit('err', err);
@@ -273,6 +273,35 @@ commands.forEach(function(k) {
     }
   };
 });
+
+RedisHAClient.prototype.incrOpcounter = function(count, done) {
+ if (typeof count == 'function') {
+    done = count;
+    count = 1;
+  }
+  var master = this.master;
+  // For write operations, increment an op counter, to judge freshness of slaves.
+  if (!master.opcounterClient) {
+    master.opcounterClient = redis.createClient(master.port, master.host, this.options);
+    if (master.auth_pass) {
+      master.opcounterClient.auth(master.auth_pass);
+    }
+    master.clients.push(master.opcounterClient);
+    if (this.options.haredis_db_num) {
+      // Make redis connect to a special db (upon ready) for the opcounter.
+      master.opcounterClient.selected_db = this.options.haredis_db_num;
+    }
+    master.opcounterClient.on('error', function(err) {
+      master.emit('error', err);
+    });
+  }
+  if (this.opcounter++ % this.options.opcounterDiviser === 0) {
+    master.opcounterClient.INCRBY('haredis:opcounter', count, done);
+  }
+  else {
+    done();
+  }
+};
 
 // Stash auth for connect and reconnect.  Send immediately if already connected.
 RedisHAClient.prototype.auth = RedisHAClient.prototype.AUTH = function () {
