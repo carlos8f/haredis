@@ -195,6 +195,7 @@ commands.forEach(function(k) {
       return;
     }
 
+    var skipOpcounter = false;
     switch (k) {
       case 'subscribe':
       case 'unsubscribe':
@@ -215,15 +216,15 @@ commands.forEach(function(k) {
           }
         }
         self.debug(k + ' on ' + this.subSlave);
-        return callCommand(this.subSlave.subClient, k, args);
+        return callCommand(this.subSlave.subClient, k, args, true);
       case 'select':
         // Need to execute on all nodes.
         // Execute on master first in case there is a callback.
         this.selected_db = parseInt(args[0]);
-        callCommand(this.master.client, k, args);
+        callCommand(this.master.client, k, args, true);
         // Execute on slaves without a callback.
         this.slaves.forEach(function(node) {
-          callCommand(node.client, k, [args[0]]);
+          callCommand(node.client, k, [args[0]], true);
         });
         return;
       case 'quit':
@@ -242,6 +243,12 @@ commands.forEach(function(k) {
           }
         });
         return;
+      case 'monitor':
+      case 'info':
+      case 'config':
+      case 'publish':
+        skipOpcounter = true;
+        break;
     }
 
     var client, node;
@@ -252,9 +259,9 @@ commands.forEach(function(k) {
       }
     }
 
-    callCommand(client, k, args);
+    callCommand(client, k, args, skipOpcounter);
 
-    function callCommand(client, command, args) {
+    function callCommand(client, command, args, skipOpcounter) {
       self._slaveOk = false;
       if (!client) {
         self.debug(command + ' on ' + self.master + ' (master default)');
@@ -262,7 +269,7 @@ commands.forEach(function(k) {
       }
       client[command].apply(client, args);
       // Increment opcounter if necessary.
-      if (!self.isRead(command, args) && command != 'publish' && command != 'monitor') {
+      if (!self.isRead(command, args) && !skipOpcounter) {
         self.incrOpcounter(function(err) {
           if (err) {
             // Will trigger failover!
