@@ -282,9 +282,13 @@ commands.forEach(function(k) {
 });
 
 RedisHAClient.prototype.incrOpcounter = function(count, done) {
- if (typeof count == 'function') {
+  if (typeof count == 'function') {
     done = count;
     count = 1;
+  }
+  if (this.options.single_mode) {
+    done();
+    return;
   }
   var master = this.master;
   // For write operations, increment an op counter, to judge freshness of slaves.
