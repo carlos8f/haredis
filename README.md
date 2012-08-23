@@ -1,3 +1,4 @@
+[![build status](https://secure.travis-ci.org/carlos8f/haredis.png)](http://travis-ci.org/carlos8f/haredis)
 haredis
 -------
 
