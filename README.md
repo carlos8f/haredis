@@ -51,8 +51,11 @@ To see this in action,
   the node it detects is freshest, set that to master, and the others to slaves!
 - Bring up 6380, and it will be added as standby for failover.
 
-API difference: createClient
-============================
+API differences
+===============
+
+`createClient`
+--------------
 
 In **haredis**, `createClient` works like this:
 
@@ -70,6 +73,19 @@ additionally supports:
 
 - `haredis_db_num` {Number} database number that **haredis** should store metadata
   in (such as an opcounter). Defaults to `15`.
+
+`auth`
+------
+
+`auth` works like this:
+
+```javascript
+function auth({host/port to password object}, callback)
+```
+
+The first argument can be an object of hosts, ports mapped to passwords
+(i.e., `{'1.2.3.1:6379': 'pass1', '1.2.3.3:6379': 'pass2'}`), or just the password
+string.
 
 Load-balancing
 ==============

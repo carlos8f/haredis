@@ -319,9 +319,19 @@ RedisHAClient.prototype.auth = RedisHAClient.prototype.AUTH = function () {
   var args = Array.prototype.slice.call(arguments);
   var self = this;
   this.auth_callback = args[1];
-  this.nodes.forEach(function(node) {
-    node.auth_pass = args[0];
-  });
+  var authList = args[0];
+  if (typeof authList == 'object'){
+    this.nodes.forEach(function(node) {
+      var auth_pass = authList[node.host + ':' + node.port];
+      if (auth_pass) {
+        node.auth_pass = auth_pass;
+      }
+    });
+  } else {
+    this.nodes.forEach(function(node) {
+      node.auth_pass = authList;
+    });
+  }
 };
 
 RedisHAClient.prototype.isRead = function(command, args) {
