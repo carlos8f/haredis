@@ -512,7 +512,12 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
       self.reorientate('node down');
     });
     node.on('error', function(err) {
-      self.warn(err);
+      if (self.listeners('error').length) {
+        self.emit('error', err);
+      }
+      else {
+        self.warn(err);
+      }
     });
     node.on('subscribe', function(channel, count) {
       if (channel != 'haredis:gossip:master') {
