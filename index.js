@@ -170,7 +170,7 @@ RedisHAClient.prototype.onReady = function() {
 
 RedisHAClient.prototype.slaveOk = RedisHAClient.prototype.slaveOK = function(command) {
   if (command) {
-    return this._slaveOk && this.isRead(command);
+    return (this._slaveOk || this.options.auto_slaveok) && this.isRead(command);
   }
   this._slaveOk = true;
   return this;
@@ -252,7 +252,7 @@ commands.forEach(function(k) {
     }
 
     var client, node;
-    if (this.options.auto_slaveok || this.slaveOk(k)) {
+    if (this.slaveOk(k)) {
       if (node = this.randomSlave()) {
         self.debug(k + ' on ' + node);
         client = node.client;
