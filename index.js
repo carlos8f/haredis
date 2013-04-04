@@ -169,10 +169,15 @@ RedisHAClient.prototype.onReady = function() {
 };
 
 RedisHAClient.prototype.slaveOk = RedisHAClient.prototype.slaveOK = function(command) {
-  if (command) {
+  if (typeof command === 'boolean') {
+    this._slaveOk = command;
+  }
+  else if (command) {
     return (this._slaveOk || this.options.auto_slaveok) && this.isRead(command);
   }
-  this._slaveOk = true;
+  else {
+    this._slaveOk = true;
+  }
   return this;
 };
 

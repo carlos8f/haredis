@@ -90,7 +90,7 @@ string.
 Load-balancing
 ==============
 
-**haredis** can also load-balance read operations to random slaves. Pub/sub
+**haredis** can optionally load-balance read operations to random slaves. Pub/sub
 subscriptions will automatically try to use a slave. For normal read-only
 commands, you can choose to query a random slave by using the `slaveOk()` method:
 
@@ -102,6 +102,13 @@ client.slaveOk().GET('foo', function(err, reply) { ...
 
 To load-balance all reads, you can set `options.auto_slaveok = true` in
 `createClient()`. Be advised that this can case problems due to replication delay!
+
+To force a read to go to master when using `auto_slaveok`, use `slaveOk(false)`
+before the command:
+
+```javascript
+client.slaveOk(false).GET('foo', function(err, reply) { ...
+```
 
 One-client pub/sub
 ==================
