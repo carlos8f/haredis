@@ -592,7 +592,7 @@ RedisHAClient.prototype.orientate = function(why) {
           err = new Error(node + ' still loading');
           return cb(err);
         }
-        else if (info.master_host) {
+        else if (info.master_port && info.master_port !== '0') {
           // Resolve the host to prevent false duplication
           Node.resolveHost(info.master_host, function(err, host) {
             if (err) {
