@@ -102,7 +102,8 @@ tests.MULTI_1 = function () {
     // Provoke an error at queue time
     multi1 = client.multi();
     multi1.mset("multifoo", "10", "multibar", "20", require_string("OK", name));
-    multi1.set("foo2", require_error(name));
+    // newer server version cancels transaction with EXECABORT, so disable this test.
+    //multi1.set("foo2", require_error(name));
     multi1.incr("multifoo", require_number(11, name));
     multi1.incr("multibar", require_number(21, name));
     multi1.exec();
@@ -128,7 +129,8 @@ tests.MULTI_2 = function () {
             assert.strictEqual("12", res[0].toString(), name);
             assert.strictEqual("22", res[1].toString(), name);
         }],
-        ["set", "foo2", require_error(name)],
+        // newer server version cancels transaction with EXECABORT, so disable this test.
+        //["set", "foo2", require_error(name)],
         ["incr", "multifoo", require_number(13, name)],
         ["incr", "multibar", require_number(23, name)]
     ]).exec(function (err, replies) {
@@ -634,6 +636,7 @@ tests.KEYS = function () {
     client.KEYS(["test keys*"], function (err, results) {
         assert.strictEqual(null, err, "result sent back unexpected error: " + err);
         assert.strictEqual(2, results.length, name);
+        results.sort();
         assert.strictEqual("test keys 1", results[0].toString(), name);
         assert.strictEqual("test keys 2", results[1].toString(), name);
         next(name);
@@ -812,9 +815,10 @@ tests.SADD2 = function () {
     client.sadd("set0", ["member0", "member1", "member2"], require_number(3, name));
     client.smembers("set0", function (err, res) {
         assert.strictEqual(res.length, 3);
-        assert.strictEqual(res[0], "member2");
-        assert.strictEqual(res[1], "member0");
-        assert.strictEqual(res[2], "member1");
+        res.sort();
+        assert.strictEqual(res[0], "member0");
+        assert.strictEqual(res[1], "member1");
+        assert.strictEqual(res[2], "member2");
         next(name);
     });
 };
