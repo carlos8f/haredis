@@ -16,7 +16,9 @@
     "async": "~0.1.22",
     "pkginfo": "~0.2.3"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "mocha": "~1.9.0"
+  },
   "optionalDependencies": {},
   "engines": {
     "node": "*"
