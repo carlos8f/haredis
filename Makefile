@@ -1,7 +1,7 @@
 test:
 	@./node_modules/.bin/mocha \
 		--reporter spec \
-		--timeout 5s \
+		--timeout 60s \
 		--require test/_common.js
 
 test-cluster:
