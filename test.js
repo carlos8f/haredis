@@ -645,6 +645,7 @@ tests.KEYS = function () {
     client.KEYS(["test keys*"], function (err, results) {
         assert.strictEqual(null, err, "result sent back unexpected error: " + err);
         assert.strictEqual(2, results.length, name);
+        results.sort();
         assert.strictEqual("test keys 1", results[0].toString(), name);
         assert.strictEqual("test keys 2", results[1].toString(), name);
         next(name);

@@ -5,10 +5,11 @@ spawn = require('child_process').spawn;
 rimraf = require('rimraf');
 mkdirp = require('mkdirp');
 idgen = require('idgen');
+path = require('path');
 
 servers = {};
 ports = [6380, 6381, 6382];
-testId = idgen(4);
+testId = null;
 
 makeServer = function (port, cb) {
   var dir = '/tmp/haredis-test-' + testId + '/' + port;
@@ -22,7 +23,6 @@ makeServer = function (port, cb) {
         cb(null, child);
       }
     });
-    child.stderr.pipe(process.stderr);
     setTimeout(function () {
       if (!started) throw new Error('redis-server on port ' + port + ' failed to start');
     }, 10000);
@@ -30,6 +30,7 @@ makeServer = function (port, cb) {
 };
 
 makeServers = function (cb) {
+  testId = idgen(4);
   var tasks = {};
   ports.forEach(function (port) {
     tasks[port] = makeServer.bind(null, port);
@@ -42,10 +43,19 @@ makeServers = function (cb) {
   });
 };
 
-process.on('exit', function () {
-  Object.keys(servers).forEach(function (port) { servers[port].kill(); });
+shutdownServers = function (cb) {
+  var latch = Object.keys(servers).length;
+  Object.keys(servers).forEach(function (port) {
+    servers[port].once('exit', function () {
+      if (!--latch && typeof cb === 'function') cb();
+    });
+    servers[port].kill();
+  });
   rimraf.sync('/tmp/haredis-test-' + testId);
-});
+  servers = {};
+}
+
+process.on('exit', shutdownServers);
 
 createClient = function () {
   var client = haredis.createClient(ports);

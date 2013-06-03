@@ -1,5 +1,6 @@
 describe('failover', function () {
   before(makeServers);
+  after(shutdownServers);
 
   var client, masterPort, newMasterPort;
   it('create client', function (done) {
