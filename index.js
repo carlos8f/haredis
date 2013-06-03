@@ -486,7 +486,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
       if (self.responded.length == nodeList.length) {
         if (self.ready) {
           self.evaluateNew = true;
-          self.reorientate('evaluating ' + this);
+          self.orientate('evaluating ' + this);
         }
         else {
           self.orientate('looking for master');
@@ -803,11 +803,16 @@ RedisHAClient.prototype.failover = function() {
     else {
       // We've succeeded in locking all the nodes. Now elect our new master...
       var winner;
-      results.forEach(function(node) {
-        if (node) {
-          if (!winner || node.opcounter > winner.opcounter) {
-            winner = node;
-          }
+      var candidates = results.filter(function (node) {
+        return !!node;
+      }).sort(function (a, b) {
+        if (a.uptime() > b.uptime()) return -1;
+        if (b.uptime() > a.uptime()) return 1;
+        return 0;
+      });
+      candidates.forEach(function (node) {
+        if (!winner || node.opcounter > winner.opcounter) {
+          winner = node;
         }
       });
       if (winner) {

@@ -22,20 +22,24 @@ describe('failover', function () {
     });
   });
 
-  it('set some data', function (done) {
-    var latch = 200;
-    for (var i = 0; i < latch; i++) {
-      (function (i) {
-        client.SET('my-test-' + i, i, function (err) {
-          assert.ifError(err);
-          if (!--latch) done();
-        });
-      })(i);
-    }
+  it('increment counter', function (done) {
+    client.INCR('test-counter', done);
   });
 
   it('wait a bit for replication', function (done) {
     setTimeout(done, 1500);
+  });
+
+  it('check counter on nodes', function (done) {
+    var latch = 3;
+    assert.equal(client.up.length, latch);
+    client.up.forEach(function (node) {
+      node.client.GET('test-counter', function (err, counter) {
+        assert.ifError(err);
+        assert.equal(counter, 1);
+        if (!--latch) done();
+      });
+    });
   });
 
   it('kill master', function (done) {
@@ -50,11 +54,15 @@ describe('failover', function () {
     servers[masterPort].kill();
   });
 
-  it('get the data anyway', function (done) {
-    client.GET('my-test-199', function (err, data) {
-      assert.ifError(err);
-      assert.equal(data, '199');
-      done();
+  it('check counter', function (done) {
+    var latch = 2;
+    assert.equal(client.up.length, latch);
+    client.up.forEach(function (node) {
+      node.client.GET('test-counter', function (err, counter) {
+        assert.ifError(err);
+        assert.equal(counter, 1);
+        if (!--latch) done();
+      });
     });
   });
 
@@ -65,24 +73,15 @@ describe('failover', function () {
     assert(client.connected);
   });
 
-  it('set new data', function (done) {
-    var latch = 200;
-    for (var i = 0; i < latch; i++) {
-      (function (i) {
-        i += 200;
-        client.SET('my-test-' + i, i, function (err) {
-          assert.ifError(err);
-          if (!--latch) done();
-        });
-      })(i);
-    }
+  it('increment counter again', function (done) {
+    client.INCR('test-counter', done);
   });
 
   it('restart old master', function (done) {
-    client.waitFor('reorientating \\(evaluating 127.0.0.1:' + masterPort + '\\) in 2000ms', done);
     makeServer(masterPort, function (err, server) {
       assert.ifError(err);
       servers[masterPort] = server;
+      done();
     });
   });
 
@@ -92,7 +91,6 @@ describe('failover', function () {
       'invalid master count: 2',
       'attempting failover!',
       'elected .* as master!',
-      'making 127.0.0.1:' + masterPort + ' into a slave...',
       'orientate complete'
     ], done);
   });
@@ -108,11 +106,20 @@ describe('failover', function () {
     assert.equal(masterCount, 1);
   });
 
-  it('get new data', function (done) {
-    client.GET('my-test-399', function (err, data) {
-      assert.ifError(err);
-      assert.equal(data, '399');
-      done();
+  it('wait a bit for replication', function (done) {
+    setTimeout(done, 1500);
+  });
+
+  it('get counter', function (done) {
+    var latch = 3;
+    assert.equal(client.up.length, latch);
+    client.up.forEach(function (node) {
+      node.client.GET('test-counter', function (err, counter) {
+        assert.ifError(err);
+        if (counter != 2) console.log('bad counter!', node + '');
+        assert.equal(counter, 2);
+        if (!--latch) done();
+      });
     });
   });
 });
