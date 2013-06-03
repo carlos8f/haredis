@@ -168,18 +168,24 @@ describe('failover', function () {
 
   it('old master is made into slave', function (done) {
     // @todo: waitFor message that masterPort made into slave
-    setTimeout(function () {
-      assert.equal(client.nodes.length, 3);
-      assert.equal(client.up.length, 3);
-      var masterCount = 0;
-      client.nodes.forEach(function (node) {
-        if (node.port === masterPort) assert.equal(node.role, 'slave');
-        else if (node.port === newMasterPort) assert.equal(node.role, 'master');
-        if (node.role === 'master') masterCount++;
-      });
-      assert.equal(masterCount, 1);
-      done()
-    }, 5000);
+    waitFor([
+      'invalid master count: 2',
+      'attempting failover!',
+      'elected .* as master!',
+      'making 127.0.0.1:' + masterPort + ' into a slave...',
+      'orientate complete'
+    ], done);
+  });
+
+  it('cluster in reasonable state', function () {
+    assert.equal(client.nodes.length, 3);
+    assert.equal(client.up.length, 3);
+    var masterCount = 0;
+    client.nodes.forEach(function (node) {
+      if (node.port === masterPort) assert.equal(node.role, 'slave');
+      if (node.role === 'master') masterCount++;
+    });
+    assert.equal(masterCount, 1);
   });
 
   it('get new data', function (done) {

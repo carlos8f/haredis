@@ -140,6 +140,7 @@ RedisHAClient.prototype.onReady = function() {
     }
     self.ready = true;
     self.orientating = false;
+    self.evaluateNew = false;
     function onDrain() {
       self.emit('drain');
     }
@@ -484,6 +485,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
       self.debug(this + ' is up');
       if (self.responded.length == nodeList.length) {
         if (self.ready) {
+          self.evaluateNew = true;
           self.reorientate('evaluating ' + this);
         }
         else {
@@ -569,7 +571,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
 
 RedisHAClient.prototype.orientate = function(why) {
   var self = this;
-  if (this.ready || this.orientating) {
+  if ((!this.evaluateNew && this.ready) || this.orientating) {
     return;
   }
   self.debug('orientating (' + why + ', ' + this.up.length + '/' + this.nodes.length + ' nodes up) ...');
