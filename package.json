@@ -16,7 +16,12 @@
     "async": "~0.1.22",
     "pkginfo": "~0.2.3"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "mocha": "~1.9.0",
+    "mkdirp": "~0.3.5",
+    "rimraf": "~2.1.4",
+    "idgen": "~1.2.0"
+  },
   "optionalDependencies": {},
   "engines": {
     "node": "*"
