@@ -1348,7 +1348,7 @@ tests.OPTIONAL_CALLBACK_UNDEFINED = function () {
 tests.auth = function () {
     var name = "AUTH", client4, ready_count = 0;
 
-    client4 = redis.createClient(9006, "filefish.redistogo.com");
+    client4 = redis.createClient(9006, "75.101.153.205");
     client4.auth("664b1b6aaf134e1ec281945a8de702a9", function (err, res) {
         assert.strictEqual(null, err, name);
         assert.strictEqual("OK", res.toString(), name);
