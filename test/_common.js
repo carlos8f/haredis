@@ -2,6 +2,7 @@ assert = require('assert');
 haredis = require('../');
 async = require('async');
 spawn = require('child_process').spawn;
+exec = require('child_process').exec;
 rimraf = require('rimraf');
 mkdirp = require('mkdirp');
 idgen = require('idgen');
@@ -12,20 +13,35 @@ ports = [6380, 6381, 6382];
 testId = null;
 
 makeServer = function (port, cb) {
-  var dir = '/tmp/haredis-test-' + testId + '/' + port;
-  mkdirp(dir, function (err) {
-    if (err) return cb(err);
-    var child = spawn('redis-server', ['--port', port, '--dir', dir, '--slave-read-only', 'no']);
-    var started = false;
-    child.stdout.on('data', function (chunk) {
-      if (~String(chunk).indexOf('The server is now ready')) {
-        started = true;
-        cb(null, child);
-      }
+  exec('redis-server --version', function (err, stdout, stderr) {
+    assert.ifError(err);
+    var version;
+    var matches = stdout.match(/Redis server v=(.*) sha=/);
+    if (matches) version = matches[1];
+    else {
+      matches = stdout.match(/version ([^ ]+) /);
+      if (matches) version = matches[1];
+      else throw new Error('could not detect redis-server version! ' + stdout);
+    }
+    var dir = '/tmp/haredis-test-' + testId + '/' + port;
+    mkdirp(dir, function (err) {
+      if (err) return cb(err);
+      var conf = 'port ' + port + '\ndir ' + dir + '\n';
+      if (!version.match(/^2\.(2|3|4)\./)) conf += 'slave-read-only no\n';
+      var child = spawn('redis-server', ['-']);
+      var started = false;
+      child.stdin.end(conf);
+      child.stderr.pipe(process.stderr);
+      child.stdout.on('data', function (chunk) {
+        if (~String(chunk).indexOf('The server is now ready')) {
+          started = true;
+          cb(null, child);
+        }
+      });
+      setTimeout(function () {
+        if (!started) throw new Error('redis-server on port ' + port + ' failed to start');
+      }, 10000);
     });
-    setTimeout(function () {
-      if (!started) throw new Error('redis-server on port ' + port + ' failed to start');
-    }, 10000);
   });
 };
 
