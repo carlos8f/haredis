@@ -908,3 +908,13 @@ RedisHAClient.prototype.nodeFromKey = function(key) {
 RedisHAClient.prototype.randomSlave = function() {
   return this.slaves[Math.round(Math.random() * (this.slaves.length - 1))];
 };
+
+RedisHAClient.prototype.end = function () {
+  var self = this, latch = this.nodes.length;
+  this.nodes.forEach(function (node) {
+    node.once('end', function () {
+      if (!--latch) self.emit('end');
+    });
+    node.end();
+  });
+};
