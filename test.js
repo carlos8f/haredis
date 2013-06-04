@@ -1354,10 +1354,11 @@ tests.OPTIONAL_CALLBACK_UNDEFINED = function () {
 
 // TODO - need a better way to test auth, maybe auto-config a local Redis server or something.
 // Yes, this is the real password.  Please be nice, thanks.
+/* disabled because this is not runnable on travis - carlos8f
 tests.auth = function () {
     var name = "AUTH", client4, ready_count = 0;
 
-    client4 = redis.createClient(9006, "75.101.153.205");
+    client4 = redis.createClient(9006, "filefish.redistogo.com");
     client4.auth("664b1b6aaf134e1ec281945a8de702a9", function (err, res) {
         assert.strictEqual(null, err, name);
         assert.strictEqual("OK", res.toString(), name);
@@ -1375,6 +1376,7 @@ tests.auth = function () {
         }
     });
 };
+*/
 
 all_tests = Object.keys(tests);
 all_start = new Date();
