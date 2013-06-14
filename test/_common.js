@@ -9,7 +9,7 @@ idgen = require('idgen');
 path = require('path');
 
 servers = {};
-ports = [6380, 6381, 6382];
+ports = ['127.0.0.1:6380', 'localhost:6381', 6382];
 testId = null;
 
 makeServer = function (port, cb) {
@@ -49,6 +49,7 @@ makeServers = function (cb) {
   testId = idgen(4);
   var tasks = {};
   ports.forEach(function (port) {
+    if (typeof port === 'string') port = Number(port.split(':')[1]);
     tasks[port] = makeServer.bind(null, port);
   });
 
