@@ -150,8 +150,10 @@ RedisHAClient.prototype.onReady = function() {
       }
     }
     self.nodes.forEach(function(node) {
-      node.client.removeListener('drain', onDrain);
-      node.client.removeListener('idle', onIdle);
+      if (node.client) {
+        node.client.removeListener('drain', onDrain);
+        node.client.removeListener('idle', onIdle);
+      }
     });
     if (!self.server_info) {
       self.debug('ready, using ' + self.master + ' as master');
@@ -548,7 +550,7 @@ RedisHAClient.prototype.parseNodeList = function(nodeList, options) {
             self.master.role = 'master';
             self.onReady();
           }
-          else {
+          else if (node.client) {
             // Hasten reconnect
             if (node.client.retry_timer) {
               clearInterval(node.client.retry_timer);
