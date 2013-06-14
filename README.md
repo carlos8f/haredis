@@ -5,6 +5,10 @@ High-availability redis in Node.js
 
 [![build status](https://secure.travis-ci.org/carlos8f/haredis.png)](http://travis-ci.org/carlos8f/haredis)
 
+(note: Travis-CI support for this project is a work in progress. If the build
+badge is red above, it's likely not really a problem with haredis, but rather a
+problem with Travis-CI running my tests. Tests pass locally for me!)
+
 Idea
 ====
 
