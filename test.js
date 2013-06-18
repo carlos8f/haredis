@@ -565,9 +565,12 @@ tests.SUBSCRIBE = function () {
         if (channel === "chan1") {
             // Callback assertions removed.
             // For some reason subscriber count is inconsistent here?
-            client2.publish("chan1", "message 1");
-            client2.publish("chan2", "message 2");
-            client2.publish("chan1", "message 3");
+            // carlos8f: timeout for subscription to sync with master
+            setTimeout(function () {
+                client2.publish("chan1", "message 1");
+                client2.publish("chan2", "message 2");
+                client2.publish("chan1", "message 3");
+            }, 1000);
         }
     });
 
