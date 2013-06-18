@@ -73,7 +73,7 @@ createClient = function () {
     setTimeout(function () {
       clearTimeout(timeout);
       if (!found) throw new Error('timed out waiting for `' + pattern + '`');
-    }, 10000);
+    }, 30000);
   };
 
   return client;
