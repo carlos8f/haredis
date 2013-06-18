@@ -52,6 +52,7 @@ describe('failover', function () {
       'orientate complete, using .* as master'
     ], done);
     servers[masterPort].kill();
+    delete servers[masterPort];
   });
 
   it('check counter', function (done) {
@@ -78,9 +79,9 @@ describe('failover', function () {
   });
 
   it('restart old master', function (done) {
-    makeServer(masterPort, function (err, server) {
+    tmp([masterPort], function (err, p, sd, s) {
       assert.ifError(err);
-      servers[masterPort] = server;
+      servers[masterPort] = s[masterPort];
       done();
     });
   });
@@ -113,6 +114,7 @@ describe('failover', function () {
   it('get counter', function (done) {
     var latch = 3;
     assert.equal(client.up.length, latch);
+    assert(client.connected);
     client.up.forEach(function (node) {
       node.client.GET('test-counter', function (err, counter) {
         assert.ifError(err);
@@ -121,5 +123,9 @@ describe('failover', function () {
         if (!--latch) done();
       });
     });
+  });
+
+  it('quit', function (done) {
+    client.quit(done);
   });
 });

@@ -1,78 +1,34 @@
 assert = require('assert');
 haredis = require('../');
 async = require('async');
-spawn = require('child_process').spawn;
-exec = require('child_process').exec;
-rimraf = require('rimraf');
-mkdirp = require('mkdirp');
-idgen = require('idgen');
+tmp = require('haredis-tmp');
 path = require('path');
+spawn = require('child_process').spawn;
 
 servers = {};
 ports = ['127.0.0.1:6380', 'localhost:6381', 6382];
-testId = null;
+var shutdown;
 
-makeServer = function (port, cb) {
-  exec('redis-server --version', function (err, stdout, stderr) {
+shutdownServers = function (done) {
+  shutdown(function (err) {
     assert.ifError(err);
-    var version;
-    var matches = stdout.match(/Redis server v=(.*) sha=/);
-    if (matches) version = matches[1];
-    else {
-      matches = stdout.match(/version ([^ ]+) /);
-      if (matches) version = matches[1];
-      else throw new Error('could not detect redis-server version! ' + stdout);
-    }
-    var dir = '/tmp/haredis-test-' + testId + '/' + port;
-    mkdirp(dir, function (err) {
-      if (err) return cb(err);
-      var conf = 'port ' + port + '\ndir ' + dir + '\n';
-      if (!version.match(/^2\.(2|3|4)\./)) conf += 'slave-read-only no\n';
-      var child = spawn('redis-server', ['-']);
-      var started = false;
-      child.stdin.end(conf);
-      child.stderr.pipe(process.stderr);
-      child.stdout.on('data', function (chunk) {
-        if (~String(chunk).indexOf('The server is now ready')) {
-          started = true;
-          cb(null, child);
-        }
-      });
-      setTimeout(function () {
-        if (!started) throw new Error('redis-server on port ' + port + ' failed to start');
-      }, 10000);
-    });
+    delete shutdown;
+    servers = {};
+    done();
   });
 };
 
-makeServers = function (cb) {
-  testId = idgen(4);
-  var tasks = {};
-  ports.forEach(function (port) {
-    if (typeof port === 'string') port = Number(port.split(':')[1]);
-    tasks[port] = makeServer.bind(null, port);
+makeServers = function (done) {
+  var _ports = ports.map(function (port) {
+    return typeof port === 'string' ? Number(port.split(':')[1]) : port;
   });
-
-  async.parallel(tasks, function (err, results) {
+  tmp(_ports, function (err, p, sd, s) {
     assert.ifError(err);
-    servers = results;
-    cb();
+    shutdown = sd;
+    servers = s;
+    done();
   });
 };
-
-shutdownServers = function (cb) {
-  var latch = Object.keys(servers).length;
-  Object.keys(servers).forEach(function (port) {
-    servers[port].once('exit', function () {
-      if (!--latch && typeof cb === 'function') cb();
-    });
-    servers[port].kill();
-  });
-  rimraf.sync('/tmp/haredis-test-' + testId);
-  servers = {};
-}
-
-process.on('exit', shutdownServers);
 
 createClient = function () {
   var client = haredis.createClient(ports);
@@ -117,7 +73,7 @@ createClient = function () {
     setTimeout(function () {
       clearTimeout(timeout);
       if (!found) throw new Error('timed out waiting for `' + pattern + '`');
-    }, 30000);
+    }, 10000);
   };
 
   return client;
