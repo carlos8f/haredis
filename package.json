@@ -12,7 +12,7 @@
     "test": "make test"
   },
   "dependencies": {
-    "redis": "latest",
+    "redis": "0.10.0",
     "async": "0.2.9",
     "pkginfo": "~0.2.3"
   },
