@@ -12,8 +12,8 @@
     "test": "make test"
   },
   "dependencies": {
-    "redis": "~0.7.2",
-    "async": "~0.1.22",
+    "redis": "0.10.0",
+    "async": "0.2.9",
     "pkginfo": "~0.2.3"
   },
   "devDependencies": {
