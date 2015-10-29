@@ -25,8 +25,45 @@ var defaults = {
   haredis_db_num: 15,
   socket_nodelay: true,
   log_level: log_level.error | log_level.warning | log_level.info,
-  opcounterDiviser: 100
+  opcounterDiviser: 100,
+  logger: null
 };
+
+var default_logger = function(connection_id){
+
+  function logFormat(type, message) {
+    return util.format('[%s](haredis#%d) %s: %s', new Date().toTimeString().split(' ')[0], connection_id, type, message);
+  }
+
+  function debug(message, label){
+    arguments[0] = logFormat('debug', message);
+    console.log.apply(null, arguments);
+  }
+
+  function log(message, label) {
+    arguments[0] = logFormat('info', message);
+    console.log.apply(null, arguments);
+  }
+
+  function warn(message, label) {
+    arguments[0] = logFormat('warning', message);
+    console.log.apply(null, arguments);
+  }
+
+  function error(message, label) {
+    arguments[0] = logFormat('ERROR', message);
+    console.error.apply(null, arguments);
+  }
+
+  // If you wish to provide a custom logger, here are the methods that are required
+  return {
+    debug: debug,
+    log:   log,
+    warn:  warn,
+    error: error
+  };
+}
+
 
 function createClient(nodes, options, etc) {
   return new RedisHAClient(nodes, options, etc);
@@ -101,34 +138,33 @@ RedisHAClient.prototype.applyDefaults = function(options) {
       self.options[k] = defaults[k];
     }
   });
+
+  // init our own logger if none was provided
+  if (this.options.logger == null){
+    this.options.logger = default_logger(this.connection_id);
+  }
 };
+
 
 RedisHAClient.prototype.debug = function(message, label) {
   if (this.options.log_level & log_level.debug || exports.debug_mode) {
-    arguments[0] = this.logFormat('debug', message);
-    console.log.apply(null, arguments);
+    this.options.logger.debug.apply(this.options.logger, arguments);
   }
 };
 RedisHAClient.prototype.log = function(message, label) {
   if (this.options.log_level & log_level.info || exports.debug_mode) {
-    arguments[0] = this.logFormat('info', message);
-    console.log.apply(null, arguments);
+    this.options.logger.log.apply(this.options.logger, arguments);
   }
 };
 RedisHAClient.prototype.warn = function(message, label) {
   if (this.options.log_level & log_level.warning || exports.debug_mode) {
-    arguments[0] = this.logFormat('warning', message);
-    console.log.apply(null, arguments);
+    this.options.logger.warn.apply(this.options.logger, arguments);
   }
 };
 RedisHAClient.prototype.error = function(message, label) {
   if (this.options.log_level & log_level.error || exports.debug_mode) {
-    arguments[0] = this.logFormat('ERROR', message);
-    console.error.apply(null, arguments);
+    this.options.logger.error.apply(this.options.logger, arguments);
   }
-};
-RedisHAClient.prototype.logFormat = function(type, message) {
-  return util.format('[%s](haredis#%d) %s: %s', new Date().toTimeString().split(' ')[0], this.connection_id, type, message);
 };
 
 RedisHAClient.prototype.onReady = function() {
