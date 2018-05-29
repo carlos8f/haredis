@@ -3,7 +3,7 @@ haredis
 
 High-availability redis in Node.js
 
-[![build status](https://secure.travis-ci.org/carlos8f/haredis.png)](http://travis-ci.org/carlos8f/haredis)
+[![build status](https://travis-ci.org/carlos8f/haredis.svg?branch=master)](http://travis-ci.org/carlos8f/haredis)
 
 (note: Travis-CI support for this project is a work in progress. If the build
 badge is red above, it's likely not really a problem with haredis, but rather a
